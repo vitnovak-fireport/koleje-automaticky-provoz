@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f6f43">
+<title>Zahradní železnice</title>
+<link rel="stylesheet" href="/static/styl.css">
+</head>
+<body>
+<main>
+  <h1>Zahradní železnice</h1>
+  <div class="chips">
+    <span class="chip" id="chip-provoz">Automat …</span>
+    <span class="chip" id="chip-mqtt">MQTT …</span>
+    <span class="chip hidden off" id="chip-spojeni">Server nedostupný</span>
+  </div>
+
+  <section class="card">
+    <div class="faze" id="faze">Načítám…</div>
+    <div class="muted" id="info"></div>
+  </section>
+
+  <section class="card">
+    <h2>Segmenty</h2>
+    <div class="segmenty">
+      <div class="seg" id="seg-1"><b>1</b><span>Okruh</span></div>
+      <div class="seg" id="seg-2"><b>2</b><span>Okruh se zastávkou</span></div>
+      <div class="seg" id="seg-3"><b>3</b><span>Stanice</span></div>
+      <div class="seg" id="seg-4"><b>4</b><span>Stanice</span></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="varovani hidden" id="varovani">
+      Před spuštěním musí oba vlaky stát ve stanici (segmenty 3 a 4 obsazené).
+    </div>
+    <div class="tlacitka">
+      <button class="primary" id="btn-spustit">Spustit provoz</button>
+      <button id="btn-ve-stanici">Ukončit po dojezdu do stanice</button>
+      <button class="danger" id="btn-zastavit">ZASTAVIT HNED</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Nastavení</h2>
+    <form id="form">
+      <label class="radek">Zastávka mezi segmenty 1 a 2
+        <input type="checkbox" name="zastavka_povolena"></label>
+      <label class="radek">Stání na zastávce (s)
+        <input type="number" name="zastavka_cekani" min="0" max="600"></label>
+      <label class="radek">Plíživá rychlost před zastávkou
+        <input type="number" name="zastavka_rychlost_dojezdu" min="0" max="127"></label>
+      <label class="radek">Rychlost vlaku ze segmentu 3
+        <input type="number" name="speed_seg3" min="0" max="127"></label>
+      <label class="radek">Rychlost vlaku ze segmentu 4
+        <input type="number" name="speed_seg4" min="0" max="127"></label>
+      <label class="radek">Rychlost vjezdu do stanice
+        <input type="number" name="rychlost_vjezdu" min="0" max="127"></label>
+      <label class="radek">Lokomotiva v segmentu 3
+        <select name="loco_seg3"></select></label>
+      <label class="radek">Lokomotiva v segmentu 4
+        <select name="loco_seg4"></select></label>
+      <div class="tlacitka" style="margin-top:10px">
+        <button class="primary" type="submit">Uložit nastavení</button>
+      </div>
+      <div class="zprava" id="zprava"></div>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Naučené vlaky</h2>
+    <div id="uceni" class="muted">Zatím nic – směr se vlak naučí při první jízdě.</div>
+    <div class="tlacitka" style="margin-top:10px">
+      <button id="btn-zapomenout">Zapomenout naučené</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Záznam provozu</h2>
+    <div class="log" id="log"></div>
+  </section>
+</main>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const form = $("form");
+  let formNacten = false;
+  let posledniLog = "";
+  let lokomotivy = {};
+
+  const nazev = (loco) => lokomotivy[loco] ? `${lokomotivy[loco]} (${loco})` : `Lokomotiva ${loco}`;
+
+  function naplnSeznamLokomotiv() {
+    for (const jmeno of ["loco_seg3", "loco_seg4"]) {
+      form.elements[jmeno].replaceChildren(...Object.keys(lokomotivy).map((loco) => new Option(nazev(loco), loco)));
+      form.elements[jmeno].onchange = zakazStejnouLokomotivu;
+    }
+  }
+
+  // Lokomotiva vybraná v jednom segmentu nejde vybrat v druhém
+  function zakazStejnouLokomotivu() {
+    const [s3, s4] = [form.elements.loco_seg3, form.elements.loco_seg4];
+    for (const o of s3.options) o.disabled = o.value === s4.value;
+    for (const o of s4.options) o.disabled = o.value === s3.value;
+  }
+
+  async function post(url, data) {
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data || {}),
+    });
+    return r.json();
+  }
+
+  function vyplnFormular(n) {
+    for (const el of form.elements) {
+      if (!el.name || !(el.name in n)) continue;
+      if (el.type === "checkbox") el.checked = n[el.name];
+      else el.value = n[el.name];
+    }
+    zakazStejnouLokomotivu();
+  }
+
+  function vykresli(s) {
+    $("chip-spojeni").classList.add("hidden");
+    const provoz = $("chip-provoz");
+    provoz.textContent = s.bezi ? (s.zastavit_ve_stanici ? "Automat končí" : "Automat běží") : "Automat stojí";
+    provoz.className = "chip " + (s.bezi ? "on" : "");
+    const mqtt = $("chip-mqtt");
+    mqtt.textContent = s.mqtt_pripojeno ? "MQTT připojeno" : "MQTT odpojeno";
+    mqtt.className = "chip " + (s.mqtt_pripojeno ? "on" : "off");
+
+    $("faze").textContent = s.faze;
+    $("info").textContent = `MQTT ${s.mqtt_broker} · Z21 ${s.z21_ip}`;
+
+    for (const [id, obsazeno] of Object.entries(s.segmenty)) {
+      const el = $("seg-" + id);
+      if (el) el.classList.toggle("obsazeno", obsazeno);
+    }
+
+    const veStanici = s.segmenty["3"] && s.segmenty["4"];
+    $("varovani").classList.toggle("hidden", s.bezi || veStanici);
+    $("btn-spustit").disabled = s.bezi;
+    $("btn-ve-stanici").disabled = !s.bezi || s.zastavit_ve_stanici;
+
+    if (!formNacten) {
+      lokomotivy = s.lokomotivy;
+      naplnSeznamLokomotiv();
+      vyplnFormular(s.nastaveni);
+      formNacten = true;
+    }
+
+    const uceni = Object.entries(s.uceni).filter(([, v]) => "smer_pres_seg1" in v);
+    $("uceni").textContent = uceni.length
+      ? uceni.map(([loco, v]) => `${nazev(loco)}: jede nejdříve do segmentu ${v.smer_pres_seg1 ? "1 – staví na zastávce" : "2 – zastávkou projíždí"}`).join("\n")
+      : "Zatím nic – směr se vlak naučí při první jízdě.";
+    $("uceni").style.whiteSpace = "pre-line";
+
+    const logText = JSON.stringify(s.log);
+    if (logText !== posledniLog) {
+      posledniLog = logText;
+      const log = $("log");
+      log.replaceChildren(...s.log.slice().reverse().map(([cas, zprava]) => {
+        const div = document.createElement("div");
+        const t = document.createElement("time");
+        t.textContent = cas;
+        div.append(t, zprava);
+        return div;
+      }));
+    }
+  }
+
+  async function obnov() {
+    try {
+      const r = await fetch("/api/stav", { cache: "no-store" });
+      vykresli(await r.json());
+    } catch (e) {
+      $("chip-spojeni").classList.remove("hidden");
+    }
+  }
+
+  $("btn-spustit").onclick = async () => {
+    if (!$("varovani").classList.contains("hidden") &&
+        !confirm("Segmenty 3 a 4 nehlásí oba vlaky ve stanici. Opravdu spustit?")) return;
+    await post("/api/spustit"); obnov();
+  };
+  $("btn-ve-stanici").onclick = async () => { await post("/api/zastavit-ve-stanici"); obnov(); };
+  $("btn-zastavit").onclick = async () => { await post("/api/zastavit"); obnov(); };
+  $("btn-zapomenout").onclick = async () => {
+    if (confirm("Smazat naučené směry vlaků?")) { await post("/api/zapomenout"); obnov(); }
+  };
+
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const data = {};
+    for (const el of form.elements) {
+      if (!el.name) continue;
+      data[el.name] = el.type === "checkbox" ? el.checked : parseInt(el.value, 10);
+    }
+    const r = await post("/api/nastaveni", data);
+    $("zprava").textContent = r.ok ? "Uloženo." : "Chyba: " + r.chyba;
+    if (r.ok) vyplnFormular(r.nastaveni);
+    setTimeout(() => { $("zprava").textContent = ""; }, 3000);
+  };
+
+  obnov();
+  setInterval(obnov, 1000);
+</script>
+</body>
+</html>

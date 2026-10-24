@@ -1,19 +1,27 @@
-# Zahradní železnice – automatický provoz
+# koleje-automaticky-provoz
+
+Zahradní železnice – automatický provoz.
 
 Webová aplikace pro automatický provoz dvou vlaků (stanice = segmenty 3 a 4, okruh = segmenty 1 a 2)
 přes centrálu Z21 a MQTT detekci obsazení. Ovládá se z prohlížeče na mobilu nebo počítači.
 
 ## Spuštění na Raspberry Pi (Podman)
 
-Zkopíruj složku projektu na Pi (např. `scp -r zahradni-zeleznice pi@raspberrypi.local:`), pak na Pi:
+Na Pi stáhni repozitář a sestav obraz:
 
 ```bash
-cd zahradni-zeleznice
-podman build -t zeleznice .
+git clone git@github.com:vitnovak-fireport/koleje-automaticky-provoz.git
 ```
 
 ```bash
-podman run -d --name zeleznice --restart=always -p 8081:8081 -p 8082:8082 -v zeleznice-data:/data -e Z21_IP=192.168.0.111 -e MQTT_BROKER=mqtt.drozdak.cz zeleznice
+cd koleje-automaticky-provoz && podman build -t koleje-automaticky-provoz .
+```
+
+(Pro `git@github.com:` musí mít Pi SSH klíč přidaný na GitHubu. U veřejného repozitáře jde i
+`git clone https://github.com/vitnovak-fireport/koleje-automaticky-provoz.git`.)
+
+```bash
+podman run -d --name koleje-automaticky-provoz --restart=always -p 8081:8081 -p 8082:8082 -v koleje-automaticky-provoz-data:/data -e Z21_IP=192.168.0.111 -e MQTT_BROKER=mqtt.drozdak.cz koleje-automaticky-provoz
 ```
 
 Aplikace má dvě webová rozhraní:
@@ -23,8 +31,19 @@ Aplikace má dvě webová rozhraní:
 - **Sledování jen pro čtení** na `http://<adresa-pi>:8082` – obsazení segmentů, lokomotivy
   na kolejišti a co se právě děje. Neumí nic ovládat ani měnit, takže ho lze vystavit do internetu.
 
-Logy: `podman logs -f zeleznice`. Aktualizace po změně kódu: `podman build` znovu, pak
-`podman rm -f zeleznice` a znovu `podman run`.
+Logy: `podman logs -f koleje-automaticky-provoz`.
+
+### Aktualizace na novou verzi
+
+```bash
+cd ~/koleje-automaticky-provoz && git pull && podman build -t koleje-automaticky-provoz .
+```
+
+```bash
+podman rm -f koleje-automaticky-provoz
+```
+
+Pak znovu stejný `podman run` jako výše. Nastavení ve volume `koleje-automaticky-provoz-data` zůstane.
 
 ### Automatický start po restartu Pi
 
