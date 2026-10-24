@@ -8,13 +8,17 @@
 <link rel="stylesheet" href="/static/styl.css">
 </head>
 <body>
-<main>
+<main class="nastenka">
+  <header>
   <h1>Zahradní železnice – živě</h1>
   <div class="chips">
     <span class="chip" id="chip-provoz">Provoz …</span>
     <span class="chip" id="chip-zastavka">Zastávka …</span>
     <span class="chip hidden off" id="chip-spojeni">Spojení ztraceno</span>
   </div>
+  </header>
+
+  <div class="sloupec-a">
 
   <section class="card">
     <div class="faze" id="faze">Načítám…</div>
@@ -31,15 +35,21 @@
     <div id="vyhybky"></div>
   </section>
 
+  </div>
+
+  <div class="sloupec-b">
   <section class="card">
     <h2>Lokomotivy na kolejišti</h2>
     <div id="lokomotivy"></div>
   </section>
+  </div>
 
+  <div class="sloupec-c">
   <section class="card">
     <h2>Co se děje</h2>
     <div class="log" id="log"></div>
   </section>
+  </div>
 </main>
 
 <script src="/static/kolejiste.js"></script>

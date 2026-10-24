@@ -8,7 +8,8 @@
 <link rel="stylesheet" href="/static/styl.css">
 </head>
 <body>
-<main>
+<main class="nastenka">
+  <header>
   <h1>Zahradní železnice</h1>
   <div class="chips">
     <span class="chip" id="chip-provoz">Automat …</span>
@@ -16,6 +17,9 @@
     <span class="chip" id="chip-z21">Z21 …</span>
     <span class="chip hidden off" id="chip-spojeni">Server nedostupný</span>
   </div>
+  </header>
+
+  <div class="sloupec-a">
 
   <section class="card">
     <div class="faze" id="faze">Načítám…</div>
@@ -33,17 +37,19 @@
     <div id="vyhybky"></div>
   </section>
 
-  <section class="card">
+  <section class="card ovladani">
     <div class="varovani hidden" id="varovani">
       Před spuštěním musí oba vlaky stát ve stanici (segmenty 3 a 4 obsazené).
     </div>
-    <div class="tlacitka">
+    <div class="tlacitka ovladani">
       <button class="primary" id="btn-spustit">Spustit provoz</button>
       <button id="btn-ve-stanici">Ukončit po dojezdu do stanice</button>
       <button class="danger" id="btn-zastavit">ZASTAVIT HNED</button>
     </div>
   </section>
+  </div>
 
+  <div class="sloupec-b">
   <section class="card">
     <h2>Nastavení</h2>
     <form id="form">
@@ -77,11 +83,14 @@
       <button id="btn-zapomenout">Zapomenout naučené</button>
     </div>
   </section>
+  </div>
 
+  <div class="sloupec-c">
   <section class="card">
     <h2>Záznam provozu</h2>
     <div class="log" id="log"></div>
   </section>
+  </div>
 </main>
 
 <script src="/static/kolejiste.js"></script>
