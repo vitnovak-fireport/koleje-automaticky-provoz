@@ -42,6 +42,17 @@
     <h2>Lokomotivy na kolejišti</h2>
     <div id="lokomotivy"></div>
   </section>
+
+  <section class="card">
+    <h2>Napájení z Z21</h2>
+    <div class="mereni">
+      <div><span>Napětí</span><b id="m-napeti">–</b></div>
+      <div><span>Proud</span><b id="m-proud">–</b></div>
+      <div><span>Výkon</span><b id="m-vykon">–</b></div>
+      <div><span>Teplota</span><b id="m-teplota">–</b></div>
+    </div>
+    <div class="muted">Jen výstup centrály, odběr boosteru na B-Busu Z21 nehlásí.</div>
+  </section>
   </div>
 
   <div class="sloupec-c">
@@ -80,6 +91,13 @@
       radek.append(jmeno, info);
       return radek;
     }));
+
+    const m = s.mereni;
+    const cislo = (h, des) => h.toLocaleString("cs-CZ", { minimumFractionDigits: des, maximumFractionDigits: des });
+    $("m-napeti").textContent = m ? `${cislo(m.napeti_v, 1)} V` : "–";
+    $("m-proud").textContent = m ? `${cislo(m.proud_a, 2)} A` : "–";
+    $("m-vykon").textContent = m ? `${cislo(m.vykon_w, 1)} W` : "–";
+    $("m-teplota").textContent = m ? `${m.teplota_c} °C` : "–";
 
     const zpravy = s.log.filter(([, zprava]) => !zprava.startsWith("->"));
     const logText = JSON.stringify(zpravy);

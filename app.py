@@ -187,6 +187,7 @@ def view_stav():
         "cesta": provoz.cesta(),
         "vyhybky_koleje": VYHYBKY_KOLEJE,
         "lokomotivy": lokomotivy,
+        "mereni": provoz.mereni_napajeni(),
         "log": [z for z in provoz.log if not z[1].startswith(SKRYTE_ZPRAVY)][-30:],
     })
 
