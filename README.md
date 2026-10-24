@@ -70,6 +70,7 @@ sudo loginctl enable-linger $USER
 | `VIEW_PORT` | `8082` | Port sledování jen pro čtení |
 | `ZASTAVKA_POVOLENA` | `1` | Výchozí stav zastávky (`1`/`0`), pokud ještě není uložené nastavení |
 | `AUTOSTART` | `0` | `1` = po startu kontejneru rovnou rozjet provoz |
+| `CASOVA_ZONA` | `Europe/Prague` | Časové pásmo pro časy v záznamu a u výhybek (nezávisle na čase systému) |
 
 Rychlosti, adresy lokomotiv a zastávku jde měnit ve webu za běhu; ukládají se do `/data/nastaveni.json`.
 

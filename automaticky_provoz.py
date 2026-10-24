@@ -5,6 +5,8 @@ import os
 import threading
 import time
 from collections import deque
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 # ==========================================
 # 1. KONFIGURACE (Upravte před spuštěním, nebo nastavte proměnnými prostředí)
@@ -24,6 +26,9 @@ CESTY = {
     4: {5: 0, 6: 1},  # Výjezd z koleje 4
 }
 POLOHY_VYHYBKY = {0: "rovně", 1: "odbočka"}
+
+# Časové pásmo pro časy v záznamu a u výhybek (nezávisle na nastavení systému, Raspberry Pi bývá v UTC)
+CASOVA_ZONA = ZoneInfo(os.environ.get("CASOVA_ZONA", "Europe/Prague"))
 
 # Ochrana proti falešnému uvolnění úseku (na výhybce)
 REQUIRED_FALSE_COUNT = 3  # Počet nutných po sobě jdoucích False stavů ze segmentů 1 a 2
@@ -102,7 +107,12 @@ class Provoz:
     def zapis(self, zprava):
         """Vypíše zprávu do konzole a uloží ji do logu pro webové rozhraní."""
         print(zprava)
-        self.log.append((time.strftime("%H:%M:%S"), zprava.strip()))
+        self.log.append((self.ted(), zprava.strip()))
+
+    @staticmethod
+    def ted():
+        """Aktuální čas HH:MM:SS v časovém pásmu CASOVA_ZONA."""
+        return datetime.now(CASOVA_ZONA).strftime("%H:%M:%S")
 
     @staticmethod
     def nazev(loco):
@@ -180,7 +190,7 @@ class Provoz:
         if address not in self.vyhybky:
             return
         puvodni = self.vyhybky[address]["stav"]
-        self.vyhybky[address] = {"stav": state, "cas": time.strftime("%H:%M:%S"), "zdroj": zdroj}
+        self.vyhybky[address] = {"stav": state, "cas": self.ted(), "zdroj": zdroj}
         if zdroj == "Z21" and state != puvodni:
             self.zapis(f"Z21 hlásí: Výhybka {address}: {POLOHY_VYHYBKY.get(state, 'neznámá poloha')} ({state})")
 
