@@ -22,13 +22,9 @@
   </section>
 
   <section class="card">
-    <h2>Segmenty</h2>
-    <div class="segmenty">
-      <div class="seg" id="seg-1"><b>1</b><span>Okruh</span></div>
-      <div class="seg" id="seg-2"><b>2</b><span>Okruh se zastávkou</span></div>
-      <div class="seg" id="seg-3"><b>3</b><span>Stanice</span></div>
-      <div class="seg" id="seg-4"><b>4</b><span>Stanice</span></div>
-    </div>
+    <h2>Kolejiště</h2>
+    <div class="kolejiste" id="kolejiste"></div>
+    <div class="legenda muted"><span>volno</span><span class="obsazeno">obsazeno</span></div>
   </section>
 
   <section class="card">
@@ -82,6 +78,7 @@
   </section>
 </main>
 
+<script src="/static/kolejiste.js"></script>
 <script>
   const $ = (id) => document.getElementById(id);
   const form = $("form");
@@ -135,10 +132,10 @@
     $("faze").textContent = s.faze;
     $("info").textContent = `MQTT ${s.mqtt_broker} · Z21 ${s.z21_ip}`;
 
-    for (const [id, obsazeno] of Object.entries(s.segmenty)) {
-      const el = $("seg-" + id);
-      if (el) el.classList.toggle("obsazeno", obsazeno);
-    }
+    vykresliKolejiste($("kolejiste"), s.segmenty, {
+      3: s.lokomotivy[s.nastaveni.loco_seg3],
+      4: s.lokomotivy[s.nastaveni.loco_seg4],
+    });
 
     const veStanici = s.segmenty["3"] && s.segmenty["4"];
     $("varovani").classList.toggle("hidden", s.bezi || veStanici);

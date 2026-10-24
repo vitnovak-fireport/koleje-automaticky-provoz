@@ -150,9 +150,9 @@ def view_index():
     return send_from_directory(app.static_folder, "view.html")
 
 
-@view_app.get("/static/styl.css")
-def view_styl():
-    return send_from_directory(app.static_folder, "styl.css")
+@view_app.get("/static/<any('styl.css', 'kolejiste.js'):soubor>")
+def view_static(soubor):
+    return send_from_directory(app.static_folder, soubor)
 
 
 @view_app.get("/api/stav")

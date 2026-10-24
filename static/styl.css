@@ -11,6 +11,7 @@
   --warn-text: #7a5600;
   --busy: #e67e22;
   --free: #cfd8d2;
+  --track: #a3aea8;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -26,6 +27,7 @@
     --warn-text: #f3d48a;
     --busy: #f39c3d;
     --free: #34403a;
+    --track: #56635c;
   }
 }
 * { box-sizing: border-box; }
@@ -97,3 +99,19 @@ input[type=checkbox] { width: 24px; height: 24px; accent-color: var(--accent); }
   gap: 4px 12px; padding: 8px 0; border-bottom: 1px solid var(--line);
 }
 .loko:last-child { border-bottom: 0; }
+.kolejiste svg { display: block; width: 100%; height: auto; }
+.seg-kolej path {
+  fill: none; stroke: var(--track); stroke-width: 7; stroke-linecap: round;
+  transition: stroke .2s;
+}
+.seg-kolej.obsazeno path { stroke: var(--busy); }
+.predel line { stroke: var(--text); stroke-width: 2.5; }
+.nastupiste { fill: var(--muted); }
+.popisek { fill: var(--text); font-size: 15px; font-weight: 700; }
+.popisek-maly { fill: var(--muted); font-size: 11px; }
+.legenda { display: flex; gap: 14px; margin-top: 6px; }
+.legenda span::before {
+  content: ""; display: inline-block; width: 18px; height: 6px; border-radius: 3px;
+  margin-right: 6px; vertical-align: middle; background: var(--track);
+}
+.legenda span.obsazeno::before { background: var(--busy); }
