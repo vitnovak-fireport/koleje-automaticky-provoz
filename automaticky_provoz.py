@@ -1,5 +1,6 @@
 import paho.mqtt.client as mqtt
 import socket
+import struct
 import json
 import os
 import threading
@@ -22,6 +23,7 @@ Z21_STAV_INTERVAL = 5  # s - jak často se ptát centrály na stav napájení ko
 Z21_POTVRZENI_TIMEOUT = 0.5  # s - po této době bez potvrzení od Z21 se povel pošle znovu
 Z21_POKUSY = 10  # Kolikrát nejvýše povel poslat, než to vzdáme
 VYHYBKA_PULZ = 0.15  # s - jak dlouho je cívka výhybky sepnutá (bez vypnutí Z21 ignoruje další přestavení)
+Z21_MERENI_PLATNOST = 5  # s - Z21 posílá napětí a proud každou sekundu, starší měření už nezobrazujeme
 
 # Stav napájení kolejiště podle Z21
 NAPAJENI_ZAPNUTO = "zapnuto"
@@ -116,6 +118,8 @@ class Provoz:
         self.vyhybky = {adresa: {"stav": None, "cas": None, "zdroj": None} for adresa in VYHYBKY}
         self.z21_posledni_zprava = None  # time.time() poslední zprávy od Z21
         self.napajeni = None  # Stav napájení kolejiště (NAPAJENI_*), None = zatím neznámý
+        self.mereni = None  # Poslední LAN_SYSTEMSTATE od Z21 (napětí, proud, teplota), viz mereni_napajeni()
+        self.mereni_cas = 0.0  # time.time() posledního měření
 
         # Povely čekající na potvrzení od Z21: klíč ("loko"/"vyhybka", adresa) -> Povel
         self._povely = {}
@@ -260,13 +264,22 @@ class Provoz:
     def z21_odpovida(self):
         return self.z21_posledni_zprava is not None and time.time() - self.z21_posledni_zprava < 2 * Z21_KEEPALIVE + 10
 
+    def mereni_napajeni(self):
+        """Napětí, proud a výkon hlavního výstupu Z21, nebo None, pokud čerstvé měření chybí.
+        Booster na B-Busu nic nehlásí, jeho odběr v hodnotách není."""
+        if self.mereni is None or time.time() - self.mereni_cas > Z21_MERENI_PLATNOST:
+            return None
+        return dict(self.mereni, vykon_w=round(self.mereni["napeti_v"] * self.mereni["proud_a"], 1))
+
     def pripojit_z21(self):
         """Přihlásí se u Z21 k hlášením o výhybkách, zjistí jejich polohu a dál poslouchá na pozadí."""
         threading.Thread(target=self._z21_smycka, daemon=True).start()
 
     def _z21_prihlaseni(self):
-        # LAN_SET_BROADCASTFLAGS 0x00000001 = hlášení o jízdě a přestavování (mj. LAN_X_TURNOUT_INFO)
-        self.udp_sock.sendto(bytes([0x08, 0x00, 0x50, 0x00, 0x01, 0x00, 0x00, 0x00]), (Z21_IP, Z21_PORT))
+        # LAN_SET_BROADCASTFLAGS (nahrazují předchozí, ne přidávají):
+        # 0x00000001 = hlášení o jízdě a přestavování (mj. LAN_X_TURNOUT_INFO)
+        # 0x00000100 = LAN_SYSTEMSTATE_DATACHANGED každou sekundu (napětí, proud, teplota)
+        self.udp_sock.sendto(bytes([0x08, 0x00, 0x50, 0x00, 0x01, 0x01, 0x00, 0x00]), (Z21_IP, Z21_PORT))
 
     @staticmethod
     def _paket_dotaz_vyhybka(address):
@@ -380,6 +393,9 @@ class Provoz:
             hlavicka = data[i + 2] | (data[i + 3] << 8)
             zprava = data[i + 4:i + delka]
             i += delka
+            if hlavicka == 0x84 and len(zprava) >= 12:
+                self._z21_systemstate(zprava)
+                continue
             if hlavicka != 0x40 or not zprava:
                 continue
             x = zprava[0]
@@ -412,6 +428,19 @@ class Provoz:
                     self._uloz_napajeni(NAPAJENI_NOUZOVE)
                 else:
                     self._uloz_napajeni(NAPAJENI_ZAPNUTO)
+
+    def _z21_systemstate(self, zprava):
+        """LAN_SYSTEMSTATE_DATACHANGED: MainCurrent, ProgCurrent, FilteredMainCurrent (mA), Temperature (°C),
+        SupplyVoltage, VCCVoltage (mV), vše little-endian. VCCVoltage je napětí, které jde do kolejí."""
+        proud, _, proud_vyhlazeny, teplota, napeti_zdroje, napeti = struct.unpack_from("<hhhhHH", zprava)
+        self.mereni = {
+            "napeti_v": round(napeti / 1000, 2),
+            "napeti_zdroje_v": round(napeti_zdroje / 1000, 2),
+            "proud_a": round(proud_vyhlazeny / 1000, 3),  # Okamžitý proud hodně kolísá, zobrazujeme vyhlazený
+            "proud_okamzity_a": round(proud / 1000, 3),
+            "teplota_c": teplota,
+        }
+        self.mereni_cas = time.time()
 
     @staticmethod
     def _stejna_jizda(ocekavano, rychlost, smer, kroky128):

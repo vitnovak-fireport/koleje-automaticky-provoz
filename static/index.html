@@ -34,6 +34,17 @@
   </section>
 
   <section class="card">
+    <h2>Napájení z Z21</h2>
+    <div class="mereni" id="mereni">
+      <div><span>Napětí</span><b id="m-napeti">–</b></div>
+      <div><span>Proud</span><b id="m-proud">–</b></div>
+      <div><span>Výkon</span><b id="m-vykon">–</b></div>
+      <div><span>Teplota</span><b id="m-teplota">–</b></div>
+    </div>
+    <div class="muted" id="m-info">Jen výstup centrály, odběr boosteru na B-Busu Z21 nehlásí.</div>
+  </section>
+
+  <section class="card">
     <h2>Výhybky</h2>
     <div id="vyhybky"></div>
   </section>
@@ -159,6 +170,13 @@
     }, s.vyhybky, s.vyhybky_koleje);
 
     vykresliVyhybky($("vyhybky"), s.vyhybky, s.cesta);
+
+    const m = s.mereni;
+    const cislo = (h, des) => h.toLocaleString("cs-CZ", { minimumFractionDigits: des, maximumFractionDigits: des });
+    $("m-napeti").textContent = m ? `${cislo(m.napeti_v, 1)} V` : "–";
+    $("m-proud").textContent = m ? `${cislo(m.proud_a, 2)} A` : "–";
+    $("m-vykon").textContent = m ? `${cislo(m.vykon_w, 1)} W` : "–";
+    $("m-teplota").textContent = m ? `${m.teplota_c} °C` : "–";
 
     const veStanici = s.segmenty["3"] && s.segmenty["4"];
     $("varovani").classList.toggle("hidden", s.bezi || veStanici);
