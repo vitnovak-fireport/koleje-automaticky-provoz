@@ -18,6 +18,17 @@ MQTT_TOPIC = os.environ.get("MQTT_TOPIC", "koleje/segment/+")  # + znamená jak�
 Z21_IP = os.environ.get("Z21_IP", "192.168.0.111")
 Z21_PORT = int(os.environ.get("Z21_PORT", "21105"))
 Z21_KEEPALIVE = 30  # s - Z21 zapomene klienta po 60 s bez komunikace, proto se pravidelně ozýváme
+Z21_STAV_INTERVAL = 5  # s - jak často se ptát centrály na stav napájení kolejiště
+Z21_POTVRZENI_TIMEOUT = 0.5  # s - po této době bez potvrzení od Z21 se povel pošle znovu
+Z21_POKUSY = 10  # Kolikrát nejvýše povel poslat, než to vzdáme
+VYHYBKA_PULZ = 0.15  # s - jak dlouho je cívka výhybky sepnutá (bez vypnutí Z21 ignoruje další přestavení)
+
+# Stav napájení kolejiště podle Z21
+NAPAJENI_ZAPNUTO = "zapnuto"
+NAPAJENI_VYPNUTO = "vypnuto"
+NAPAJENI_NOUZOVE = "nouzové zastavení"
+NAPAJENI_ZKRAT = "zkrat"
+NAPAJENI_PO_OBNOVENI = 3  # s - po obnovení napájení počkat, než se srovnají hlášení obsazenosti
 
 # Výhybky ve stanici a jejich nastavení pro výjezd z jednotlivých staničních kolejí (0 = rovně, 1 = odbočka)
 VYHYBKY = (5, 6)
@@ -62,6 +73,20 @@ class Zastaveno(Exception):
     """Provoz byl zastaven uživatelem."""
 
 
+class Povel:
+    """Povel pro Z21, který čeká na potvrzení. Bez potvrzení se posílá znovu (UDP pakety se můžou ztratit)."""
+
+    def __init__(self, ocekavano, pakety, popis, deaktivace=None):
+        self.ocekavano = ocekavano  # Co má Z21 nahlásit, aby byl povel potvrzený
+        self.pakety = pakety        # Povel a dotaz na stav, posílají se vždy spolu
+        self.deaktivace = deaktivace  # Paket poslaný VYHYBKA_PULZ po povelu (vypnutí cívky výhybky)
+        self.popis = popis
+        self.pokusy = 1
+        self.odeslano = time.time()
+        self.potvrzeno = False
+        self.vyrizeno = threading.Event()  # Potvrzeno, nebo vzdáno
+
+
 class Provoz:
     """Automatický provoz dvou vlaků mezi stanicí (segmenty 3 a 4) a okruhem (segmenty 1 a 2)."""
 
@@ -85,9 +110,16 @@ class Provoz:
 
         self.faze = "Zastaveno"
         self.rychlosti = {}  # Poslední rychlost odeslaná každé lokomotivě
+        self.smery = {}  # Poslední směr odeslaný každé lokomotivě
+        self.lokomotivy_z21 = {}  # Rychlost a směr lokomotiv, jak je hlásí Z21: adresa -> (rychlost, směr)
         # Stav výhybek: stav (0/1/None = neznámý), cas (HH:MM:SS), zdroj ("skript" = povel ze skriptu, "Z21" = hlášení centrály)
         self.vyhybky = {adresa: {"stav": None, "cas": None, "zdroj": None} for adresa in VYHYBKY}
         self.z21_posledni_zprava = None  # time.time() poslední zprávy od Z21
+        self.napajeni = None  # Stav napájení kolejiště (NAPAJENI_*), None = zatím neznámý
+
+        # Povely čekající na potvrzení od Z21: klíč ("loko"/"vyhybka", adresa) -> Povel
+        self._povely = {}
+        self._povely_zamek = threading.Lock()
         self.log = deque(maxlen=200)
         self.mqtt_pripojeno = False
         self.zastavit_ve_stanici = False
@@ -120,9 +152,31 @@ class Provoz:
         return f"{LOKOMOTIVY[loco]} ({loco})" if loco in LOKOMOTIVY else f"Lokomotiva {loco}"
 
     def _cekej(self, sekundy):
-        """Jako time.sleep, ale při zastavení provozu okamžitě skončí."""
+        """
+        Jako time.sleep, ale při zastavení provozu okamžitě skončí.
+        Když je kolejiště bez proudu, počká na obnovení napájení (provoz se pozastaví).
+        """
         if self._stop.wait(sekundy):
             raise Zastaveno()
+        if self.napajeni not in (None, NAPAJENI_ZAPNUTO):
+            self._pozastav()
+
+    def _pozastav(self):
+        """Počká na obnovení napájení kolejiště a pak lokomotivám znovu pošle jejich rychlosti."""
+        faze = self.faze
+        self.faze = f"Pozastaveno - kolejiště: {self.napajeni}"
+        self.zapis(f"Kolejiště je bez proudu ({self.napajeni}), provoz čeká na obnovení napájení.")
+        while self.napajeni != NAPAJENI_ZAPNUTO:
+            if self._stop.wait(0.2):
+                raise Zastaveno()
+        self.zapis(f"Napájení kolejiště obnoveno, za {NAPAJENI_PO_OBNOVENI} s pokračuji.")
+        if self._stop.wait(NAPAJENI_PO_OBNOVENI):
+            raise Zastaveno()
+        # Nouzové zastavení v Z21 vynuluje rychlosti lokomotiv, proto je pošleme znovu
+        for loco in (self.nastaveni["loco_seg3"], self.nastaveni["loco_seg4"]):
+            if loco in self.rychlosti:
+                self.set_loco_speed(loco, self.rychlosti[loco], self.smery.get(loco, 1))
+        self.faze = faze
 
     # ==========================================
     # 2. FUNKCE PRO Z21 (UDP Protokol)
@@ -164,32 +218,34 @@ class Provoz:
         # Data: [0x53 (LAN_X_SET_TURNOUT), AH, AL, DB2]
         packet_active = bytes([0x09, 0x00, 0x40, 0x00, 0x53, addr_high, addr_low, db2_active, checksum_active])
 
-        # Odeslání povelu centrále
-        self.udp_sock.sendto(packet_active, (Z21_IP, Z21_PORT))
-        # Uložit hned - Z21 obvykle potvrdí novou polohu dřív, než uplyne čekání na přehození
-        self.uloz_stav_vyhybky(address, state, "skript")
-
-        self._cekej(1)
-
-        """
-        # (Volitelné) Massoth a další DCC dekodéry obvykle potřebují cívku po sepnutí uvolnit,
-        # aby nedošlo k jejímu spálení. Některé centrály to dělají samy, ale je bezpečnější poslat vypínací povel.
-        time.sleep(0.15)  # Počkáme 150 ms (čas pro spolehlivé přeskočení výhybky)
-
-        # Sestavení vypínacího paketu (Bit 3 = 0, základ je 0x80)
+        # Vypínací paket (Bit 3 = 0) - pošle se VYHYBKA_PULZ po zapnutí. Bez něj Z21 považuje výstup
+        # za stále sepnutý a další přestavení téže výhybky ignoruje (ověřeno na skutečné Z21).
         db2_inactive = 0x80 | (state & 0x01)
         checksum_inactive = 0x53 ^ addr_high ^ addr_low ^ db2_inactive
         packet_inactive = bytes([0x09, 0x00, 0x40, 0x00, 0x53, addr_high, addr_low, db2_inactive, checksum_inactive])
 
-        self.udp_sock.sendto(packet_inactive, (Z21_IP, Z21_PORT))"""
-
+        # Odeslání povelu centrále spolu s dotazem na polohu - polohu uložíme, až ji Z21 potvrdí
+        povel = self._posli_s_potvrzenim(("vyhybka", address), state,
+                                         [packet_active, self._paket_dotaz_vyhybka(address)],
+                                         f"výhybka {address}: {POLOHY_VYHYBKY.get(state, state)}",
+                                         deaktivace=packet_inactive)
         self.zapis(f"-> Výhybka {address}: {POLOHY_VYHYBKY.get(state, state)} ({state})")
+
+        # Vlak se nesmí rozjet přes nepřestavenou výhybku - bez potvrzení provoz skončí chybou
+        while not povel.vyrizeno.is_set():
+            self._cekej(0.05)
+        if not povel.potvrzeno:
+            raise RuntimeError(f"Z21 nepotvrdila přestavení výhybky {address}")
+
+        self._cekej(1)
 
     def uloz_stav_vyhybky(self, address, state, zdroj):
         """Zapamatuje si polohu výhybky. Změnu, kterou nahlásí Z21 (např. ruční přestavení), zapíše do logu."""
         if address not in self.vyhybky:
             return
         puvodni = self.vyhybky[address]["stav"]
+        if zdroj == "Z21" and state == puvodni:
+            return  # Jen další hlášení stejné polohy (např. odpověď na dotaz) - ponecháme původní zdroj
         self.vyhybky[address] = {"stav": state, "cas": self.ted(), "zdroj": zdroj}
         if zdroj == "Z21" and state != puvodni:
             self.zapis(f"Z21 hlásí: Výhybka {address}: {POLOHY_VYHYBKY.get(state, 'neznámá poloha')} ({state})")
@@ -212,16 +268,81 @@ class Provoz:
         # LAN_SET_BROADCASTFLAGS 0x00000001 = hlášení o jízdě a přestavování (mj. LAN_X_TURNOUT_INFO)
         self.udp_sock.sendto(bytes([0x08, 0x00, 0x50, 0x00, 0x01, 0x00, 0x00, 0x00]), (Z21_IP, Z21_PORT))
 
-    def _z21_dotaz_vyhybka(self, address):
+    @staticmethod
+    def _paket_dotaz_vyhybka(address):
         # LAN_X_GET_TURNOUT_INFO
         z21_addr = address - 1
         addr_high, addr_low = (z21_addr >> 8) & 0xFF, z21_addr & 0xFF
-        packet = bytes([0x08, 0x00, 0x40, 0x00, 0x43, addr_high, addr_low, 0x43 ^ addr_high ^ addr_low])
-        self.udp_sock.sendto(packet, (Z21_IP, Z21_PORT))
+        return bytes([0x08, 0x00, 0x40, 0x00, 0x43, addr_high, addr_low, 0x43 ^ addr_high ^ addr_low])
+
+    def _z21_dotaz_vyhybka(self, address):
+        self.udp_sock.sendto(self._paket_dotaz_vyhybka(address), (Z21_IP, Z21_PORT))
+
+    def _z21_dotaz_stav(self):
+        # LAN_X_GET_STATUS - odpovědí je LAN_X_STATUS_CHANGED se stavem napájení kolejiště
+        self.udp_sock.sendto(bytes([0x07, 0x00, 0x40, 0x00, 0x21, 0x24, 0x05]), (Z21_IP, Z21_PORT))
+
+    def _posli_s_potvrzenim(self, klic, ocekavano, pakety, popis, deaktivace=None):
+        """Pošle povel centrále a zařadí ho mezi povely čekající na potvrzení (novější povel nahradí starší)."""
+        povel = Povel(ocekavano, pakety, popis, deaktivace)
+        with self._povely_zamek:
+            stary = self._povely.get(klic)
+            self._povely[klic] = povel
+        if stary:
+            stary.vyrizeno.set()
+        self._odesli(povel)
+        return povel
+
+    def _odesli(self, povel):
+        for paket in povel.pakety:
+            self.udp_sock.sendto(paket, (Z21_IP, Z21_PORT))
+        if povel.deaktivace:
+            threading.Timer(VYHYBKA_PULZ, self.udp_sock.sendto, (povel.deaktivace, (Z21_IP, Z21_PORT))).start()
+
+    def _potvrd(self, klic, shoda):
+        """Z21 nahlásila stav - pokud odpovídá čekajícímu povelu (shoda(ocekavano) je True), povel je potvrzený."""
+        with self._povely_zamek:
+            povel = self._povely.get(klic)
+            if povel is None or not shoda(povel.ocekavano):
+                return False
+            del self._povely[klic]
+        povel.potvrzeno = True
+        povel.vyrizeno.set()
+        if povel.pokusy > 1:
+            self.zapis(f"Z21 potvrdila povel ({povel.popis}) až na {povel.pokusy}. pokus.")
+        return True
+
+    def _ceka_na_potvrzeni(self, klic):
+        with self._povely_zamek:
+            return klic in self._povely
+
+    def _z21_opakuj(self):
+        """Povely, které Z21 do Z21_POTVRZENI_TIMEOUT nepotvrdila, pošle znovu, nebo je po Z21_POKUSY vzdá."""
+        ted = time.time()
+        znovu, vzdane = [], []
+        with self._povely_zamek:
+            for klic, povel in list(self._povely.items()):
+                if ted - povel.odeslano < Z21_POTVRZENI_TIMEOUT:
+                    continue
+                if povel.pokusy >= Z21_POKUSY:
+                    del self._povely[klic]
+                    vzdane.append(povel)
+                else:
+                    povel.pokusy += 1
+                    povel.odeslano = ted
+                    znovu.append(povel)
+        for povel in znovu:
+            if povel.pokusy == 2:
+                self.zapis(f"Z21 nepotvrdila povel ({povel.popis}), posílám znovu.")
+            self._odesli(povel)
+        for povel in vzdane:
+            self.zapis(f"CHYBA: Z21 ani po {Z21_POKUSY} pokusech nepotvrdila povel ({povel.popis})!")
+            povel.vyrizeno.set()
 
     def _z21_smycka(self):
-        self.udp_sock.settimeout(1)
+        self.udp_sock.settimeout(0.1)  # Krátký timeout, aby se včas opakovaly nepotvrzené povely
         posledni_prihlaseni = 0
+        posledni_dotaz_stav = 0
         while True:
             try:
                 if time.time() - posledni_prihlaseni >= Z21_KEEPALIVE:
@@ -230,6 +351,14 @@ class Provoz:
                         for adresa in VYHYBKY:
                             self._z21_dotaz_vyhybka(adresa)
                     posledni_prihlaseni = time.time()
+                if time.time() - posledni_dotaz_stav >= Z21_STAV_INTERVAL:
+                    self._z21_dotaz_stav()
+                    # Z21 první pakety od nového klienta často zahodí, proto se ptáme, dokud polohu nezjistíme
+                    for adresa in VYHYBKY:
+                        if self.vyhybky[adresa]["stav"] is None:
+                            self._z21_dotaz_vyhybka(adresa)
+                    posledni_dotaz_stav = time.time()
+                self._z21_opakuj()
                 data, _ = self.udp_sock.recvfrom(1024)
                 self._z21_zpracuj(data)
             except socket.timeout:
@@ -240,7 +369,8 @@ class Provoz:
                 time.sleep(1)
 
     def _z21_zpracuj(self, data):
-        """Projde zprávy od Z21 (jeden UDP paket jich může obsahovat víc) a vybere hlášení o výhybkách."""
+        """Projde zprávy od Z21 (jeden UDP paket jich může obsahovat víc) a vybere hlášení o výhybkách,
+        lokomotivách a napájení kolejiště."""
         self.z21_posledni_zprava = time.time()
         i = 0
         while i + 4 <= len(data):
@@ -249,12 +379,65 @@ class Provoz:
                 return
             hlavicka = data[i + 2] | (data[i + 3] << 8)
             zprava = data[i + 4:i + delka]
+            i += delka
+            if hlavicka != 0x40 or not zprava:
+                continue
+            x = zprava[0]
             # LAN_X_TURNOUT_INFO: 0x43, FAdr_MSB, FAdr_LSB, 000000ZZ (01 = poloha 0, 10 = poloha 1)
-            if hlavicka == 0x40 and delka == 9 and zprava[0] == 0x43:
+            if x == 0x43 and delka == 9:
                 adresa = ((zprava[1] << 8) | zprava[2]) + 1
                 stav = {0b01: 0, 0b10: 1}.get(zprava[3] & 0x03)
-                self.uloz_stav_vyhybky(adresa, stav, "Z21")
-            i += delka
+                potvrzeno = stav is not None and self._potvrd(("vyhybka", adresa), lambda o: o == stav)
+                self.uloz_stav_vyhybky(adresa, stav, "skript" if potvrzeno else "Z21")
+            # LAN_X_LOCO_INFO: 0xEF, Adr_MSB, Adr_LSB, 0000BFFF (FFF = 4 -> 128 kroků), RVVVVVVV, ...
+            elif x == 0xEF and len(zprava) >= 5:
+                self._z21_loko_info(((zprava[1] & 0x3F) << 8) | zprava[2],
+                                    zprava[4] & 0x7F, 1 if zprava[4] & 0x80 else 0, (zprava[3] & 0x07) == 4)
+            # LAN_X_BC_TRACK_POWER_OFF / _ON / _SHORT_CIRCUIT
+            elif x == 0x61 and len(zprava) >= 2:
+                stav = {0x00: NAPAJENI_VYPNUTO, 0x01: NAPAJENI_ZAPNUTO, 0x08: NAPAJENI_ZKRAT}.get(zprava[1])
+                if stav:
+                    self._uloz_napajeni(stav)
+            # LAN_X_BC_STOPPED (nouzové zastavení)
+            elif x == 0x81 and len(zprava) >= 2 and zprava[1] == 0x00:
+                self._uloz_napajeni(NAPAJENI_NOUZOVE)
+            # LAN_X_STATUS_CHANGED: 0x62, 0x22, stav (0x01 nouzové zastavení, 0x02 bez napětí, 0x04 zkrat)
+            elif x == 0x62 and len(zprava) >= 3 and zprava[1] == 0x22:
+                stav = zprava[2]
+                if stav & 0x04:
+                    self._uloz_napajeni(NAPAJENI_ZKRAT)
+                elif stav & 0x02:
+                    self._uloz_napajeni(NAPAJENI_VYPNUTO)
+                elif stav & 0x01:
+                    self._uloz_napajeni(NAPAJENI_NOUZOVE)
+                else:
+                    self._uloz_napajeni(NAPAJENI_ZAPNUTO)
+
+    @staticmethod
+    def _stejna_jizda(ocekavano, rychlost, smer, kroky128):
+        """Odpovídá rychlost a směr nahlášené Z21 odeslanému povelu?"""
+        rychlost_o, smer_o = ocekavano
+        if smer != smer_o:
+            return False
+        if kroky128:
+            return rychlost == rychlost_o
+        return (rychlost > 0) == (rychlost_o > 0)  # Jiný počet kroků - porovnáme jen jede/stojí
+
+    def _z21_loko_info(self, adresa, rychlost, smer, kroky128):
+        """Z21 hlásí stav lokomotivy - potvrdí čekající povel, nebo zapíše změnu z jiného ovladače."""
+        predchozi = self.lokomotivy_z21.get(adresa)
+        self.lokomotivy_z21[adresa] = (rychlost, smer)
+        if self._potvrd(("loko", adresa), lambda o: self._stejna_jizda(o, rychlost, smer, kroky128)):
+            return
+        if (adresa in self.rychlosti and (rychlost, smer) != predchozi
+                and not self._ceka_na_potvrzeni(("loko", adresa))
+                and not self._stejna_jizda((self.rychlosti[adresa], self.smery.get(adresa, 1)), rychlost, smer, kroky128)):
+            self.zapis(f"Z21 hlásí: {self.nazev(adresa)}: Rychlost {rychlost}, Směr {smer} (změněno jiným ovladačem?)")
+
+    def _uloz_napajeni(self, stav):
+        if stav != self.napajeni:
+            self.napajeni = stav
+            self.zapis(f"Z21 hlásí: napájení kolejiště {stav}")
 
     def set_loco_speed(self, address, speed, direction=1):
         """
@@ -274,10 +457,16 @@ class Provoz:
 
         data = [0xE4, DB0, DB1, DB2, DB3]
         cs = self.checksum(data)
-        packet = bytearray([0x0A, 0x00, 0x40, 0x00] + data + [cs])
+        packet = bytes([0x0A, 0x00, 0x40, 0x00] + data + [cs])
 
-        self.udp_sock.sendto(packet, (Z21_IP, Z21_PORT))
+        # LAN_X_GET_LOCO_INFO - Z21 odpoví stavem lokomotivy a přihlásí nás k jejím dalším změnám
+        dotaz = [0xE3, 0xF0, DB1, DB2]
+        dotaz_packet = bytes([0x09, 0x00, 0x40, 0x00] + dotaz + [self.checksum(dotaz)])
+
         self.rychlosti[address] = speed
+        self.smery[address] = direction
+        self._posli_s_potvrzenim(("loko", address), (speed, direction), [packet, dotaz_packet],
+                                 f"{self.nazev(address)}: rychlost {speed}")
         self.zapis(f"-> {self.nazev(address)}: Rychlost {speed}, Směr {direction}")
 
     # ==========================================

@@ -15,6 +15,7 @@
     <span class="chip" id="chip-provoz">Automat …</span>
     <span class="chip" id="chip-mqtt">MQTT …</span>
     <span class="chip" id="chip-z21">Z21 …</span>
+    <span class="chip hidden" id="chip-napajeni">Kolejiště …</span>
     <span class="chip hidden off" id="chip-spojeni">Server nedostupný</span>
   </div>
   </header>
@@ -145,6 +146,9 @@
     mqtt.className = "chip " + (s.mqtt_pripojeno ? "on" : "off");
     $("chip-z21").textContent = s.z21_odpovida ? "Z21 odpovídá" : "Z21 neodpovídá";
     $("chip-z21").className = "chip " + (s.z21_odpovida ? "on" : "off");
+    const napajeni = $("chip-napajeni");
+    napajeni.textContent = s.napajeni === "zapnuto" ? "Kolejiště pod proudem" : `Kolejiště: ${s.napajeni}`;
+    napajeni.className = "chip " + (!s.z21_odpovida || !s.napajeni ? "hidden" : s.napajeni === "zapnuto" ? "on" : "off");
 
     $("faze").textContent = s.faze;
     $("info").textContent = `MQTT ${s.mqtt_broker} · Z21 ${s.z21_ip}`;

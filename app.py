@@ -91,6 +91,7 @@ def stav():
         "zastavit_ve_stanici": provoz.zastavit_ve_stanici,
         "mqtt_pripojeno": provoz.mqtt_pripojeno,
         "z21_odpovida": provoz.z21_odpovida(),
+        "napajeni": provoz.napajeni,
         "mqtt_broker": MQTT_BROKER,
         "z21_ip": Z21_IP,
         "segmenty": {str(k): v for k, v in provoz.segments.items()},
