@@ -5,7 +5,7 @@ import threading
 from flask import Flask, jsonify, request, send_from_directory
 from waitress import create_server
 
-from automaticky_provoz import Provoz, VYCHOZI_NASTAVENI, LOKOMOTIVY, MQTT_BROKER, Z21_IP
+from automaticky_provoz import Provoz, VYCHOZI_NASTAVENI, LOKOMOTIVY, VYHYBKY, CESTY, MQTT_BROKER, Z21_IP
 
 # ==========================================
 # KONFIGURACE WEBU (proměnné prostředí)
@@ -15,6 +15,12 @@ VIEW_PORT = int(os.environ.get("VIEW_PORT", "8082"))  # Sledování jen pro čte
 DATA_DIR = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "data"))
 SOUBOR_NASTAVENI = os.path.join(DATA_DIR, "nastaveni.json")
 AUTOSTART = os.environ.get("AUTOSTART", "0") == "1"  # 1 = po startu kontejneru rovnou rozjet provoz
+
+# Na kterou staniční kolej vede která poloha výhybky, např. {"5": {"0": 4, "1": 3}} - pro schéma na webu
+VYHYBKY_KOLEJE = {
+    str(vyhybka): {str(polohy[vyhybka]): kolej for kolej, polohy in CESTY.items()}
+    for vyhybka in VYHYBKY
+}
 
 # Povolené rozsahy nastavení, která jdou měnit z webu
 ROZSAHY = {
@@ -84,9 +90,13 @@ def stav():
         "faze": provoz.faze,
         "zastavit_ve_stanici": provoz.zastavit_ve_stanici,
         "mqtt_pripojeno": provoz.mqtt_pripojeno,
+        "z21_odpovida": provoz.z21_odpovida(),
         "mqtt_broker": MQTT_BROKER,
         "z21_ip": Z21_IP,
         "segmenty": {str(k): v for k, v in provoz.segments.items()},
+        "vyhybky": {str(k): v for k, v in provoz.vyhybky.items()},
+        "cesta": provoz.cesta(),
+        "vyhybky_koleje": VYHYBKY_KOLEJE,
         "uceni": {str(k): v for k, v in provoz.uceni.items()},
         "nastaveni": provoz.nastaveni,
         "lokomotivy": {str(k): v for k, v in LOKOMOTIVY.items()},
@@ -171,6 +181,9 @@ def view_stav():
         "faze": provoz.faze,
         "zastavka_povolena": n["zastavka_povolena"],
         "segmenty": {str(k): v for k, v in provoz.segments.items()},
+        "vyhybky": {str(k): v for k, v in provoz.vyhybky.items()},
+        "cesta": provoz.cesta(),
+        "vyhybky_koleje": VYHYBKY_KOLEJE,
         "lokomotivy": lokomotivy,
         "log": [z for z in provoz.log if not z[1].startswith(SKRYTE_ZPRAVY)][-30:],
     })
@@ -178,6 +191,7 @@ def view_stav():
 
 if __name__ == "__main__":
     provoz.pripojit_mqtt()
+    provoz.pripojit_z21()
     if AUTOSTART:
         provoz.spustit()
     ovladani = create_server(app, host="0.0.0.0", port=WEB_PORT, threads=4)

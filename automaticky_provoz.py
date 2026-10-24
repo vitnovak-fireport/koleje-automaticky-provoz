@@ -15,6 +15,15 @@ MQTT_TOPIC = os.environ.get("MQTT_TOPIC", "koleje/segment/+")  # + znamená jak�
 
 Z21_IP = os.environ.get("Z21_IP", "192.168.0.111")
 Z21_PORT = int(os.environ.get("Z21_PORT", "21105"))
+Z21_KEEPALIVE = 30  # s - Z21 zapomene klienta po 60 s bez komunikace, proto se pravidelně ozýváme
+
+# Výhybky ve stanici a jejich nastavení pro výjezd z jednotlivých staničních kolejí (0 = rovně, 1 = odbočka)
+VYHYBKY = (5, 6)
+CESTY = {
+    3: {5: 1, 6: 0},  # Výjezd z koleje 3
+    4: {5: 0, 6: 1},  # Výjezd z koleje 4
+}
+POLOHY_VYHYBKY = {0: "rovně", 1: "odbočka"}
 
 # Ochrana proti falešnému uvolnění úseku (na výhybce)
 REQUIRED_FALSE_COUNT = 3  # Počet nutných po sobě jdoucích False stavů ze segmentů 1 a 2
@@ -71,6 +80,9 @@ class Provoz:
 
         self.faze = "Zastaveno"
         self.rychlosti = {}  # Poslední rychlost odeslaná každé lokomotivě
+        # Stav výhybek: stav (0/1/None = neznámý), cas (HH:MM:SS), zdroj ("skript" = povel ze skriptu, "Z21" = hlášení centrály)
+        self.vyhybky = {adresa: {"stav": None, "cas": None, "zdroj": None} for adresa in VYHYBKY}
+        self.z21_posledni_zprava = None  # time.time() poslední zprávy od Z21
         self.log = deque(maxlen=200)
         self.mqtt_pripojeno = False
         self.zastavit_ve_stanici = False
@@ -78,8 +90,9 @@ class Provoz:
         self._stop = threading.Event()
         self._vlakno = None
 
-        # UDP Socket pro Z21
+        # UDP Socket pro Z21 (navázaný na pevný lokální port, aby šlo přijímat odpovědi centrály)
         self.udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.udp_sock.bind(("", 0))
 
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
         self.client.on_connect = self.on_connect
@@ -143,6 +156,8 @@ class Provoz:
 
         # Odeslání povelu centrále
         self.udp_sock.sendto(packet_active, (Z21_IP, Z21_PORT))
+        # Uložit hned - Z21 obvykle potvrdí novou polohu dřív, než uplyne čekání na přehození
+        self.uloz_stav_vyhybky(address, state, "skript")
 
         self._cekej(1)
 
@@ -158,7 +173,78 @@ class Provoz:
 
         self.udp_sock.sendto(packet_inactive, (Z21_IP, Z21_PORT))"""
 
-        self.zapis(f"-> Výhybka {address} nastavena na stav {state}")
+        self.zapis(f"-> Výhybka {address}: {POLOHY_VYHYBKY.get(state, state)} ({state})")
+
+    def uloz_stav_vyhybky(self, address, state, zdroj):
+        """Zapamatuje si polohu výhybky. Změnu, kterou nahlásí Z21 (např. ruční přestavení), zapíše do logu."""
+        if address not in self.vyhybky:
+            return
+        puvodni = self.vyhybky[address]["stav"]
+        self.vyhybky[address] = {"stav": state, "cas": time.strftime("%H:%M:%S"), "zdroj": zdroj}
+        if zdroj == "Z21" and state != puvodni:
+            self.zapis(f"Z21 hlásí: Výhybka {address}: {POLOHY_VYHYBKY.get(state, 'neznámá poloha')} ({state})")
+
+    def cesta(self):
+        """Na kterou staniční kolej jsou výhybky nastavené (3, 4), nebo None."""
+        for kolej, polohy in CESTY.items():
+            if all(self.vyhybky[a]["stav"] == stav for a, stav in polohy.items()):
+                return kolej
+        return None
+
+    def z21_odpovida(self):
+        return self.z21_posledni_zprava is not None and time.time() - self.z21_posledni_zprava < 2 * Z21_KEEPALIVE + 10
+
+    def pripojit_z21(self):
+        """Přihlásí se u Z21 k hlášením o výhybkách, zjistí jejich polohu a dál poslouchá na pozadí."""
+        threading.Thread(target=self._z21_smycka, daemon=True).start()
+
+    def _z21_prihlaseni(self):
+        # LAN_SET_BROADCASTFLAGS 0x00000001 = hlášení o jízdě a přestavování (mj. LAN_X_TURNOUT_INFO)
+        self.udp_sock.sendto(bytes([0x08, 0x00, 0x50, 0x00, 0x01, 0x00, 0x00, 0x00]), (Z21_IP, Z21_PORT))
+
+    def _z21_dotaz_vyhybka(self, address):
+        # LAN_X_GET_TURNOUT_INFO
+        z21_addr = address - 1
+        addr_high, addr_low = (z21_addr >> 8) & 0xFF, z21_addr & 0xFF
+        packet = bytes([0x08, 0x00, 0x40, 0x00, 0x43, addr_high, addr_low, 0x43 ^ addr_high ^ addr_low])
+        self.udp_sock.sendto(packet, (Z21_IP, Z21_PORT))
+
+    def _z21_smycka(self):
+        self.udp_sock.settimeout(1)
+        posledni_prihlaseni = 0
+        while True:
+            try:
+                if time.time() - posledni_prihlaseni >= Z21_KEEPALIVE:
+                    self._z21_prihlaseni()
+                    if posledni_prihlaseni == 0 or not self.z21_odpovida():
+                        for adresa in VYHYBKY:
+                            self._z21_dotaz_vyhybka(adresa)
+                    posledni_prihlaseni = time.time()
+                data, _ = self.udp_sock.recvfrom(1024)
+                self._z21_zpracuj(data)
+            except socket.timeout:
+                continue
+            except OSError:
+                if self.udp_sock.fileno() == -1:
+                    return  # Socket byl zavřen při ukončení skriptu
+                time.sleep(1)
+
+    def _z21_zpracuj(self, data):
+        """Projde zprávy od Z21 (jeden UDP paket jich může obsahovat víc) a vybere hlášení o výhybkách."""
+        self.z21_posledni_zprava = time.time()
+        i = 0
+        while i + 4 <= len(data):
+            delka = data[i] | (data[i + 1] << 8)
+            if delka < 4:
+                return
+            hlavicka = data[i + 2] | (data[i + 3] << 8)
+            zprava = data[i + 4:i + delka]
+            # LAN_X_TURNOUT_INFO: 0x43, FAdr_MSB, FAdr_LSB, 000000ZZ (01 = poloha 0, 10 = poloha 1)
+            if hlavicka == 0x40 and delka == 9 and zprava[0] == 0x43:
+                adresa = ((zprava[1] << 8) | zprava[2]) + 1
+                stav = {0b01: 0, 0b10: 1}.get(zprava[3] & 0x03)
+                self.uloz_stav_vyhybky(adresa, stav, "Z21")
+            i += delka
 
     def set_loco_speed(self, address, speed, direction=1):
         """
@@ -334,8 +420,8 @@ class Provoz:
             if state == 0:
                 self.zapis("\n--- FAZE 0: Výjezd lokomotivy ze Segmentu 3 ---")
                 self.faze = f"Vlak {self.nazev(loco3)} vyjíždí ze segmentu 3"
-                self.set_turnout(5, 1)
-                self.set_turnout(6, 0)
+                for vyhybka, poloha in CESTY[3].items():
+                    self.set_turnout(vyhybka, poloha)
                 self._cekej(1)  # Počkat na přehození
 
                 self.set_loco_speed(loco3, n["speed_seg3"], direction=1)
@@ -396,8 +482,8 @@ class Provoz:
             elif state == 10:
                 self.zapis("\n--- FAZE 10: Výjezd lokomotivy ze Segmentu 4 ---")
                 self.faze = f"Vlak {self.nazev(loco4)} vyjíždí ze segmentu 4"
-                self.set_turnout(5, 0)
-                self.set_turnout(6, 1)
+                for vyhybka, poloha in CESTY[4].items():
+                    self.set_turnout(vyhybka, poloha)
                 self._cekej(1)
 
                 # Nastavte směr (direction=0 nebo 1) podle toho, jak máte okruh zapojený
@@ -460,6 +546,7 @@ class Provoz:
 if __name__ == "__main__":
     provoz = Provoz()
     provoz.pripojit_mqtt()
+    provoz.pripojit_z21()
     provoz.spustit()
 
     try:

@@ -109,9 +109,14 @@ input[type=checkbox] { width: 24px; height: 24px; accent-color: var(--accent); }
 .nastupiste { fill: var(--muted); }
 .popisek { fill: var(--text); font-size: 15px; font-weight: 700; }
 .popisek-maly { fill: var(--muted); font-size: 11px; }
-.legenda { display: flex; gap: 14px; margin-top: 6px; }
+.legenda { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; }
 .legenda span::before {
   content: ""; display: inline-block; width: 18px; height: 6px; border-radius: 3px;
   margin-right: 6px; vertical-align: middle; background: var(--track);
 }
 .legenda span.obsazeno::before { background: var(--busy); }
+.cesta { font-weight: 600; margin-bottom: 4px; }
+.vyhybka path { fill: none; stroke: transparent; stroke-width: 4; stroke-linecap: round; }
+.vyhybka path.aktivni { stroke: var(--accent); }
+.vyhybka.neznama path { stroke: var(--muted); stroke-width: 2; stroke-dasharray: 2 3; }
+.legenda span.jazyk::before { background: var(--accent); }

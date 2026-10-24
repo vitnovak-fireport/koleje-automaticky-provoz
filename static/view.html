@@ -23,7 +23,12 @@
   <section class="card">
     <h2>Kolejiště</h2>
     <div class="kolejiste" id="kolejiste"></div>
-    <div class="legenda muted"><span>volno</span><span class="obsazeno">obsazeno</span></div>
+    <div class="legenda muted"><span>volno</span><span class="obsazeno">obsazeno</span><span class="jazyk">poloha výhybky</span></div>
+  </section>
+
+  <section class="card">
+    <h2>Výhybky</h2>
+    <div id="vyhybky"></div>
   </section>
 
   <section class="card">
@@ -50,7 +55,9 @@
     $("faze").textContent = s.faze;
 
     vykresliKolejiste($("kolejiste"), s.segmenty,
-      Object.fromEntries(s.lokomotivy.map((l) => [l.kolej, l.jmeno])));
+      Object.fromEntries(s.lokomotivy.map((l) => [l.kolej, l.jmeno])), s.vyhybky, s.vyhybky_koleje);
+
+    vykresliVyhybky($("vyhybky"), s.vyhybky, s.cesta);
 
     $("lokomotivy").replaceChildren(...s.lokomotivy.map((l) => {
       const radek = document.createElement("div");

@@ -2,6 +2,7 @@
 // Segment 2 = levá polovina horní strany + levá strana + levé zhlaví,
 // segment 1 = pravá polovina horní strany + pravá strana + spodní strana + pravé zhlaví.
 // Zastávka je na horní straně těsně za předělem segmentů 1 a 2.
+// Výhybka 6 je na levém zhlaví, výhybka 5 na pravém. Zvýrazněný jazyk ukazuje, na kterou kolej je přestavená.
 const KOLEJISTE_SVG = `
 <svg viewBox="0 0 400 245" role="img" aria-label="Schéma kolejiště">
   <g class="seg-kolej" data-seg="2">
@@ -18,6 +19,14 @@ const KOLEJISTE_SVG = `
   <g class="seg-kolej" data-seg="4">
     <path d="M85 215 H235"/>
   </g>
+  <g class="vyhybka" data-vyhybka="6">
+    <path data-kolej="3" d="M45 190 H68"/>
+    <path data-kolej="4" d="M45 190 C54 190 59.4 199 66.6 206.2"/>
+  </g>
+  <g class="vyhybka" data-vyhybka="5">
+    <path data-kolej="4" d="M275 215 H252"/>
+    <path data-kolej="3" d="M275 215 C264.8 215 258.6 210.7 253.7 205.9"/>
+  </g>
   <g class="predel">
     <line x1="250" y1="27" x2="250" y2="43"/>
     <line x1="75" y1="182" x2="75" y2="198"/>
@@ -31,11 +40,14 @@ const KOLEJISTE_SVG = `
   <text class="popisek" x="354" y="118">1</text>
   <text class="popisek" data-popisek="3" x="150" y="181" text-anchor="middle">3</text>
   <text class="popisek" data-popisek="4" x="160" y="238" text-anchor="middle">4</text>
+  <text class="popisek-maly" data-vyhybka-popisek="6" x="38" y="238" text-anchor="middle">výh. 6</text>
+  <text class="popisek-maly" data-vyhybka-popisek="5" x="292" y="238" text-anchor="middle">výh. 5</text>
 </svg>`;
 
-// Vloží schéma do prvku (jednou) a obarví obsazené segmenty.
-// segmenty: {"1": true, ...}, lokomotivy: {"3": "Banán", "4": "Vectron"} - jména u staničních kolejí
-function vykresliKolejiste(el, segmenty, lokomotivy) {
+// Vloží schéma do prvku (jednou), obarví obsazené segmenty a nakreslí polohu výhybek.
+// segmenty: {"1": true, ...}, lokomotivy: {"3": "Banán", "4": "Vectron"} - jména u staničních kolejí,
+// vyhybky: {"5": {stav: 0|1|null}}, vyhybkyKoleje: {"5": {"0": 4, "1": 3}} - kam vede která poloha
+function vykresliKolejiste(el, segmenty, lokomotivy, vyhybky, vyhybkyKoleje) {
   if (!el.firstElementChild) el.innerHTML = KOLEJISTE_SVG;
   for (const [id, obsazeno] of Object.entries(segmenty)) {
     const seg = el.querySelector(`.seg-kolej[data-seg="${id}"]`);
@@ -45,4 +57,42 @@ function vykresliKolejiste(el, segmenty, lokomotivy) {
     const popisek = el.querySelector(`[data-popisek="${kolej}"]`);
     popisek.textContent = lokomotivy && lokomotivy[kolej] ? `${kolej} · ${lokomotivy[kolej]}` : kolej;
   }
+  for (const g of el.querySelectorAll(".vyhybka")) {
+    const adresa = g.dataset.vyhybka;
+    const stav = vyhybky && vyhybky[adresa] ? vyhybky[adresa].stav : null;
+    const kolej = stav === null ? undefined : (vyhybkyKoleje[adresa] || {})[stav];
+    for (const vetev of g.querySelectorAll("path")) {
+      vetev.classList.toggle("aktivni", String(kolej) === vetev.dataset.kolej);
+    }
+    g.classList.toggle("neznama", kolej === undefined);
+    el.querySelector(`[data-vyhybka-popisek="${adresa}"]`).textContent =
+      kolej === undefined ? `výh. ${adresa} ?` : `výh. ${adresa} → ${kolej}`;
+  }
+}
+
+// Vypíše polohy výhybek a na kterou staniční kolej je nastavená cesta.
+// vyhybky: {"5": {stav: 0|1|null, cas: "HH:MM:SS", zdroj: "skript"|"Z21"}}, cesta: 3 | 4 | null
+function vykresliVyhybky(el, vyhybky, cesta) {
+  const polohy = { 0: "rovně", 1: "odbočka" };
+  const zdroje = { skript: "povel skriptu", Z21: "hlášení Z21" };
+  const radky = Object.entries(vyhybky).map(([adresa, v]) => {
+    const radek = document.createElement("div");
+    radek.className = "loko";
+    const nazev = document.createElement("b");
+    nazev.textContent = `Výhybka ${adresa}`;
+    const info = document.createElement("span");
+    info.className = "muted";
+    info.textContent = v.stav === null
+      ? "poloha zatím neznámá"
+      : `${polohy[v.stav]} (${v.stav}) · ${v.cas} · ${zdroje[v.zdroj] || v.zdroj}`;
+    radek.append(nazev, info);
+    return radek;
+  });
+  const souhrn = document.createElement("div");
+  souhrn.className = "cesta";
+  const znamy = Object.values(vyhybky).every((v) => v.stav !== null);
+  souhrn.textContent = cesta
+    ? `Cesta nastavena na kolej ${cesta}`
+    : znamy ? "Výhybky nejsou nastavené na žádnou staniční kolej" : "Cesta zatím neznámá";
+  el.replaceChildren(souhrn, ...radky);
 }
