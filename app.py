@@ -97,14 +97,14 @@ def stav():
         "bezi": provoz.bezi(),
         "faze": provoz.faze,
         "zastavit_ve_stanici": provoz.zastavit_ve_stanici,
-        "mqtt_pripojeno": provoz.mqtt_pripojeno,
+        "mqtt_pripojeno": provoz.obsazenost.pripojeno,
         "tlacitko": stav_tlacitka(),
         "z21_odpovida": provoz.z21.odpovida(),
         "napajeni": provoz.z21.napajeni,
         "mereni": provoz.z21.mereni_napajeni(),
         "mqtt_broker": MQTT_BROKER,
         "z21_ip": Z21_IP,
-        "segmenty": {str(k): v for k, v in provoz.segments.items()},
+        "segmenty": {str(k): v for k, v in provoz.obsazenost.segmenty.items()},
         "vyhybky": {str(k): v for k, v in provoz.z21.vyhybky.items()},
         "cesta": provoz.cesta(),
         "vyhybky_koleje": VYHYBKY_KOLEJE,
@@ -217,7 +217,7 @@ def view_stav():
             "ceka": provoz.ceka_na_tlacitko,
             "stisky_dnes": provoz.tlacitko.stisky,
         },
-        "segmenty": {str(k): v for k, v in provoz.segments.items()},
+        "segmenty": {str(k): v for k, v in provoz.obsazenost.segmenty.items()},
         "vyhybky": {str(k): v for k, v in provoz.z21.vyhybky.items()},
         "cesta": provoz.cesta(),
         "vyhybky_koleje": VYHYBKY_KOLEJE,
@@ -228,7 +228,7 @@ def view_stav():
 
 
 if __name__ == "__main__":
-    provoz.pripojit_mqtt()
+    provoz.obsazenost.pripojit()
     provoz.tlacitko.pripojit()
     provoz.z21.pripojit()
     if AUTOSTART:

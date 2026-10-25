@@ -1,5 +1,3 @@
-import paho.mqtt.client as mqtt
-import json
 import os
 import threading
 import time
@@ -7,6 +5,7 @@ from collections import deque
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from obsazeni import Obsazenost
 from tlacitko import Tlacitko
 from z21 import Z21, NAPAJENI_ZAPNUTO
 
@@ -85,23 +84,12 @@ class Provoz:
         self.nastaveni = dict(VYCHOZI_NASTAVENI)
         self.nastaveni.update(nastaveni or {})
 
-        # Globální stav segmentů (aktualizováno přes MQTT)
-        self.segments = {
-            1: False,
-            2: False,
-            3: True,  # Výchozí stav - předpokládáme, že tam vlaky stojí
-            4: True
-        }
-        # Čas poslední změny stavu každého segmentu (time.time())
-        self.segment_changed_at = {1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0}
-
         # Naučené charakteristiky vlaků podle adresy lokomotivy:
         # smer_pres_seg1 (vjíždí nejdříve do segmentu 1?)
         self.uceni = {}
 
         self.faze = "Zastaveno"
         self.log = deque(maxlen=200)
-        self.mqtt_pripojeno = False
         self.zastavit_ve_stanici = False
 
         # Jízda na okruh a zastávka na znamení (čte je i obsluha tlačítka z vlákna MQTT)
@@ -121,10 +109,13 @@ class Provoz:
         # Centrála Z21 - povely lokomotivám a výhybkám, hlášení výhybek a napájení kolejiště
         self.z21 = Z21(Z21_IP, Z21_PORT, VYHYBKY, self.zapis, nazev=self.nazev, ted=self.ted)
 
-        self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-        self.client.on_connect = self.on_connect
-        self.client.on_disconnect = self.on_disconnect
-        self.client.on_message = self.on_message
+        # Detekce obsazení segmentů přes MQTT
+        self.obsazenost = Obsazenost(MQTT_BROKER, MQTT_PORT, MQTT_TOPIC, self.zapis, vychozi={
+            1: False,
+            2: False,
+            3: True,  # Výchozí stav - předpokládáme, že tam vlaky stojí
+            4: True
+        })
 
         # Tlačítko pro kolemjdoucí (LoRaWAN přes MQTT The Things Industries)
         self.tlacitko = Tlacitko(TLACITKO_MQTT_BROKER, TLACITKO_MQTT_PORT, TLACITKO_MQTT_USER, TLACITKO_MQTT_PASS,
@@ -207,40 +198,7 @@ class Provoz:
         return True
 
     # ==========================================
-    # 3. MQTT CALLBACKY
-    # ==========================================
-    def pripojit_mqtt(self):
-        """Připojí se k MQTT na pozadí (při výpadku se klient sám znovu připojuje)."""
-        self.client.connect_async(MQTT_BROKER, MQTT_PORT, 60)
-        self.client.loop_start()
-
-    def on_connect(self, client, userdata, flags, reason_code, properties):
-        self.zapis(f"Připojeno k MQTT {MQTT_BROKER} s kódem {reason_code}")
-        self.mqtt_pripojeno = not reason_code.is_failure
-        client.subscribe(MQTT_TOPIC)
-
-    def on_disconnect(self, client, userdata, flags, reason_code, properties):
-        self.zapis(f"Odpojeno od MQTT ({reason_code})")
-        self.mqtt_pripojeno = False
-
-    def on_message(self, client, userdata, msg):
-        """Zpracuje příchozí JSON zprávy o obsazení z MQTT."""
-        try:
-            # Příklad topicu: koleje/segment/1
-            segment_id = int(msg.topic.split('/')[-1])
-            payload = json.loads(msg.payload.decode('utf-8'))
-            is_blocked = payload.get("segment_blocked", False)
-
-            if self.segments.get(segment_id) != is_blocked:
-                self.segment_changed_at[segment_id] = time.time()
-            self.segments[segment_id] = is_blocked
-            # Odkomentujte pro detailní debug výpis
-            # print(f"Senzor: Segment {segment_id} -> {is_blocked}")
-        except Exception as e:
-            self.zapis(f"Chyba při zpracování zprávy MQTT: {e}")
-
-    # ==========================================
-    # 3b. TLAČÍTKO PRO KOLEMJDOUCÍ (příjem zpráv je v tlacitko.py)
+    # 3. TLAČÍTKO PRO KOLEMJDOUCÍ (příjem zpráv je v tlacitko.py)
     # ==========================================
     def stisk_tlacitka(self):
         """
@@ -287,20 +245,21 @@ class Provoz:
         """
         false_count = 0
         while false_count < REQUIRED_FALSE_COUNT:
-            false_count = false_count + 1 if self.segments[segment_id] == False else 0
+            false_count = false_count + 1 if self.obsazenost.segmenty[segment_id] == False else 0
             self._cekej(0.1)
-        return self.segment_changed_at[segment_id]
+        return self.obsazenost.zmeneno[segment_id]
 
     def zjisti_smer(self, loco):
         """Při výjezdu ze stanice zjistí, jestli vlak vjede nejdříve do segmentu 1, nebo 2."""
         info = self.uceni.setdefault(loco, {})
         if "smer_pres_seg1" in info:
             return
-        if self.segments[1] or self.segments[2]:
-            if self.segments[1] and self.segments[2]:
-                prvni = 1 if self.segment_changed_at[1] <= self.segment_changed_at[2] else 2
+        segmenty, zmeneno = self.obsazenost.segmenty, self.obsazenost.zmeneno
+        if segmenty[1] or segmenty[2]:
+            if segmenty[1] and segmenty[2]:
+                prvni = 1 if zmeneno[1] <= zmeneno[2] else 2
             else:
-                prvni = 1 if self.segments[1] else 2
+                prvni = 1 if segmenty[1] else 2
             info["smer_pres_seg1"] = prvni == 1
             self.zapis(f"Učení: {self.nazev(loco)} vjíždí ze stanice nejdříve do segmentu {prvni}.")
 
@@ -342,7 +301,7 @@ class Provoz:
         a teprve pak se rozhodne, jestli vlak zastaví).
         """
         if t_zpomaleni is None:
-            while self.segments[2] == False:
+            while self.obsazenost.segmenty[2] == False:
                 self._cekej(0.05)
             if not self.rozhodni_zastavku(loco):
                 return
@@ -442,7 +401,7 @@ class Provoz:
 
     def main_loop(self):
         self.zapis("Spouštím automatický provoz...")
-        segments = self.segments
+        segments = self.obsazenost.segmenty
 
         # Stavy:
         # 0: Vlak 3 startuje, 1: Vlak 3 opouští stanici, 2: Vlak 3 je na trati, 3: Vlak 3 dojíždí
@@ -592,7 +551,7 @@ class Provoz:
 # ==========================================
 if __name__ == "__main__":
     provoz = Provoz()
-    provoz.pripojit_mqtt()
+    provoz.obsazenost.pripojit()
     provoz.tlacitko.pripojit()
     provoz.z21.pripojit()
     provoz.spustit()
@@ -603,5 +562,5 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\nUkončuji skript...")
         provoz.zastavit()
-        provoz.client.loop_stop()
+        provoz.obsazenost.odpojit()
         provoz.z21.zavrit()
