@@ -100,13 +100,13 @@ def stav():
         "zastavit_ve_stanici": provoz.zastavit_ve_stanici,
         "mqtt_pripojeno": provoz.mqtt_pripojeno,
         "tlacitko": stav_tlacitka(),
-        "z21_odpovida": provoz.z21_odpovida(),
-        "napajeni": provoz.napajeni,
-        "mereni": provoz.mereni_napajeni(),
+        "z21_odpovida": provoz.z21.odpovida(),
+        "napajeni": provoz.z21.napajeni,
+        "mereni": provoz.z21.mereni_napajeni(),
         "mqtt_broker": MQTT_BROKER,
         "z21_ip": Z21_IP,
         "segmenty": {str(k): v for k, v in provoz.segments.items()},
-        "vyhybky": {str(k): v for k, v in provoz.vyhybky.items()},
+        "vyhybky": {str(k): v for k, v in provoz.z21.vyhybky.items()},
         "cesta": provoz.cesta(),
         "vyhybky_koleje": VYHYBKY_KOLEJE,
         "uceni": {str(k): v for k, v in provoz.uceni.items()},
@@ -206,7 +206,7 @@ def view_stav():
             "adresa": loco,
             "jmeno": LOKOMOTIVY[loco]["nazev"] if loco in LOKOMOTIVY else f"Lokomotiva {loco}",
             "kolej": kolej,
-            "rychlost": provoz.rychlosti.get(loco, 0),
+            "rychlost": provoz.z21.rychlosti.get(loco, 0),
         })
     return jsonify({
         "bezi": provoz.bezi(),
@@ -219,11 +219,11 @@ def view_stav():
             "stisky_dnes": provoz.tlacitko_stisky,
         },
         "segmenty": {str(k): v for k, v in provoz.segments.items()},
-        "vyhybky": {str(k): v for k, v in provoz.vyhybky.items()},
+        "vyhybky": {str(k): v for k, v in provoz.z21.vyhybky.items()},
         "cesta": provoz.cesta(),
         "vyhybky_koleje": VYHYBKY_KOLEJE,
         "lokomotivy": lokomotivy,
-        "mereni": provoz.mereni_napajeni(),
+        "mereni": provoz.z21.mereni_napajeni(),
         "log": [z for z in provoz.log if not z[1].startswith(SKRYTE_ZPRAVY)][-30:],
     })
 
@@ -231,7 +231,7 @@ def view_stav():
 if __name__ == "__main__":
     provoz.pripojit_mqtt()
     provoz.pripojit_tlacitko()
-    provoz.pripojit_z21()
+    provoz.z21.pripojit()
     if AUTOSTART:
         provoz.spustit()
     ovladani = create_server(app, host="0.0.0.0", port=WEB_PORT, threads=4)
