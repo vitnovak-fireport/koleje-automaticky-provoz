@@ -1,6 +1,8 @@
 # koleje-automaticky-provoz
 
-Zahradní železnice – automatický provoz.
+Stavědlo Drozďák – automatický provoz.
+
+Sledování jen pro čtení běží na <https://stavedlo.drozdak.cz>.
 
 Webová aplikace pro automatický provoz dvou vlaků (stanice = segmenty 3 a 4, okruh = segmenty 1 a 2)
 přes centrálu Z21 a MQTT detekci obsazení. Ovládá se z prohlížeče na mobilu nebo počítači.
