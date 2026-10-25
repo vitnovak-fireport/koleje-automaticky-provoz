@@ -32,7 +32,7 @@
   <section class="card">
     <h2>Kolejiště</h2>
     <div class="kolejiste" id="kolejiste"></div>
-    <div class="legenda muted"><span>volno</span><span class="obsazeno">obsazeno</span><span class="jazyk">poloha výhybky</span></div>
+    <div class="legenda muted"><span>volno</span><span class="obsazeno">obsazeno</span><span class="jazyk">poloha výhybky</span><span class="tunel">tunel svítí</span></div>
   </section>
 
   <section class="card">
@@ -87,7 +87,8 @@
       + `Dnes tlačítko stisklo ${t.stisky_dnes}×.`;
 
     vykresliKolejiste($("kolejiste"), s.segmenty,
-      Object.fromEntries(s.lokomotivy.map((l) => [l.kolej, l.jmeno])), s.vyhybky, s.vyhybky_koleje);
+      Object.fromEntries(s.lokomotivy.map((l) => [l.kolej, l.jmeno])), s.vyhybky, s.vyhybky_koleje,
+      s.osvetleni_tunelu);
 
     vykresliVyhybky($("vyhybky"), s.vyhybky, s.cesta);
 

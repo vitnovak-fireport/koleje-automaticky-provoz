@@ -31,7 +31,7 @@
   <section class="card">
     <h2>Kolejiště</h2>
     <div class="kolejiste" id="kolejiste"></div>
-    <div class="legenda muted"><span>volno</span><span class="obsazeno">obsazeno</span><span class="jazyk">poloha výhybky</span></div>
+    <div class="legenda muted"><span>volno</span><span class="obsazeno">obsazeno</span><span class="jazyk">poloha výhybky</span><span class="tunel">tunel svítí</span></div>
   </section>
 
   <section class="card">
@@ -193,7 +193,7 @@
     vykresliKolejiste($("kolejiste"), s.segmenty, {
       3: s.lokomotivy[s.nastaveni.loco_seg3],
       4: s.lokomotivy[s.nastaveni.loco_seg4],
-    }, s.vyhybky, s.vyhybky_koleje);
+    }, s.vyhybky, s.vyhybky_koleje, s.osvetleni_tunelu);
 
     vykresliVyhybky($("vyhybky"), s.vyhybky, s.cesta);
 

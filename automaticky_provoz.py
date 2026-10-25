@@ -38,6 +38,9 @@ CESTY = {
     4: {5: 0, 6: 1},  # Výjezd z koleje 4
 }
 
+# Osvětlení obou tunelů: DCC adresa dekodéru a číslo funkce (stav hlásí Z21, zobrazuje se na schématu)
+OSVETLENI_TUNELU = (3, 1)
+
 # Časové pásmo pro časy v záznamu a u výhybek (nezávisle na nastavení systému, Raspberry Pi bývá v UTC)
 CASOVA_ZONA = ZoneInfo(os.environ.get("CASOVA_ZONA", "Europe/Prague"))
 
@@ -107,7 +110,8 @@ class Provoz:
         self._vlakno = None
 
         # Centrála Z21 - povely lokomotivám a výhybkám, hlášení výhybek a napájení kolejiště
-        self.z21 = Z21(Z21_IP, Z21_PORT, VYHYBKY, self.zapis, nazev=self.nazev, ted=self.ted)
+        self.z21 = Z21(Z21_IP, Z21_PORT, VYHYBKY, self.zapis, nazev=self.nazev, ted=self.ted,
+                       lokomotivy=(OSVETLENI_TUNELU[0],))
 
         # Detekce obsazení segmentů přes MQTT
         self.obsazenost = Obsazenost(MQTT_BROKER, MQTT_PORT, MQTT_TOPIC, self.zapis, vychozi={

@@ -3,6 +3,7 @@
 // segment 1 = pravá polovina horní strany + pravá strana + spodní strana + pravé zhlaví.
 // Zastávka je na horní straně těsně za předělem segmentů 1 a 2.
 // Výhybka 6 je na levém zhlaví, výhybka 5 na pravém. Zvýrazněný jazyk ukazuje, na kterou kolej je přestavená.
+// Dva tunely (každý 1 m) v segmentu 1: na horní straně za zastávkou a na pravé straně. Svítí-li, jsou žluté.
 const KOLEJISTE_SVG = `
 <svg viewBox="0 0 400 245" role="img" aria-label="Schéma kolejiště">
   <g class="seg-kolej" data-seg="2">
@@ -27,6 +28,11 @@ const KOLEJISTE_SVG = `
     <path data-kolej="4" d="M275 215 H252"/>
     <path data-kolej="3" d="M275 215 C264.8 215 258.6 210.7 253.7 205.9"/>
   </g>
+  <g class="tunely">
+    <title>Tunely</title>
+    <rect x="262" y="26" width="46" height="18" rx="4"/>
+    <rect x="371" y="70" width="18" height="50" rx="4"/>
+  </g>
   <g class="predel">
     <line x1="250" y1="27" x2="250" y2="43"/>
     <line x1="75" y1="182" x2="75" y2="198"/>
@@ -46,9 +52,15 @@ const KOLEJISTE_SVG = `
 
 // Vloží schéma do prvku (jednou), obarví obsazené segmenty a nakreslí polohu výhybek.
 // segmenty: {"1": true, ...}, lokomotivy: {"3": "Banán", "4": "Vectron"} - jména u staničních kolejí,
-// vyhybky: {"5": {stav: 0|1|null}}, vyhybkyKoleje: {"5": {"0": 4, "1": 3}} - kam vede která poloha
-function vykresliKolejiste(el, segmenty, lokomotivy, vyhybky, vyhybkyKoleje) {
+// vyhybky: {"5": {stav: 0|1|null}}, vyhybkyKoleje: {"5": {"0": 4, "1": 3}} - kam vede která poloha,
+// osvetleniTunelu: true | false | null (neznámé)
+function vykresliKolejiste(el, segmenty, lokomotivy, vyhybky, vyhybkyKoleje, osvetleniTunelu) {
   if (!el.firstElementChild) el.innerHTML = KOLEJISTE_SVG;
+  const tunely = el.querySelector(".tunely");
+  tunely.classList.toggle("sviti", osvetleniTunelu === true);
+  tunely.classList.toggle("neznama", osvetleniTunelu == null);
+  tunely.querySelector("title").textContent = osvetleniTunelu == null
+    ? "Tunely – osvětlení neznámé" : `Tunely – osvětlení ${osvetleniTunelu ? "svítí" : "zhasnuté"}`;
   for (const [id, obsazeno] of Object.entries(segmenty)) {
     const seg = el.querySelector(`.seg-kolej[data-seg="${id}"]`);
     if (seg) seg.classList.toggle("obsazeno", obsazeno);

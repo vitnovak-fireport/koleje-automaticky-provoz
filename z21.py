@@ -40,9 +40,10 @@ class Z21:
     """Komunikace s centrálou Z21 (UDP): povely lokomotivám a výhybkám s potvrzováním, hlášení výhybek,
     lokomotiv a napájení kolejiště."""
 
-    def __init__(self, ip, port, vyhybky, zapis, nazev=None, ted=None):
+    def __init__(self, ip, port, vyhybky, zapis, nazev=None, ted=None, lokomotivy=()):
         """
         :param vyhybky: adresy výhybek, jejichž polohu sledujeme
+        :param lokomotivy: adresy dekodérů, jejichž funkce sledujeme i bez povelů ze skriptu (např. osvětlení)
         :param zapis: funkce pro zápis zprávy do logu
         :param nazev: funkce, která z adresy lokomotivy udělá jméno pro výpisy
         :param ted: funkce vracející aktuální čas HH:MM:SS (u poloh výhybek)
@@ -55,6 +56,8 @@ class Z21:
         self.rychlosti = {}  # Poslední rychlost odeslaná každé lokomotivě
         self.smery = {}  # Poslední směr odeslaný každé lokomotivě
         self.lokomotivy_z21 = {}  # Rychlost a směr lokomotiv, jak je hlásí Z21: adresa -> (rychlost, směr)
+        self.sledovane_lokomotivy = tuple(lokomotivy)
+        self._loko_info = {}  # Poslední LAN_X_LOCO_INFO od Z21 podle adresy (nese stav funkcí), viz stav_funkce()
         # Stav výhybek: stav (0/1/None = neznámý), cas (HH:MM:SS), zdroj ("skript" = povel ze skriptu, "Z21" = hlášení centrály)
         self.vyhybky = {adresa: {"stav": None, "cas": None, "zdroj": None} for adresa in vyhybky}
         self.posledni_zprava = None  # time.time() poslední zprávy od Z21
@@ -87,6 +90,13 @@ class Z21:
 
     def odpovida(self):
         return self.posledni_zprava is not None and time.time() - self.posledni_zprava < 2 * Z21_KEEPALIVE + 10
+
+    def stav_funkce(self, adresa, cislo):
+        """Stav funkce F<cislo> dekodéru, jak ho naposledy nahlásila Z21 (True/False), None = neznámý."""
+        zprava = self._loko_info.get(adresa)
+        if zprava is None or not self.odpovida():
+            return None
+        return self._stav_funkce(zprava, cislo)
 
     def mereni_napajeni(self):
         """Napětí, proud a výkon hlavního výstupu Z21, nebo None, pokud čerstvé měření chybí.
@@ -203,6 +213,9 @@ class Z21:
     def _dotaz_vyhybka(self, address):
         self.udp_sock.sendto(self._paket_dotaz_vyhybka(address), self.adresa)
 
+    def _dotaz_loko(self, address):
+        self.udp_sock.sendto(self._paket_dotaz_loko(address), self.adresa)
+
     def _dotaz_stav(self):
         # LAN_X_GET_STATUS - odpovědí je LAN_X_STATUS_CHANGED se stavem napájení kolejiště
         self.udp_sock.sendto(bytes([0x07, 0x00, 0x40, 0x00, 0x21, 0x24, 0x05]), self.adresa)
@@ -281,6 +294,9 @@ class Z21:
                     if posledni_prihlaseni == 0 or not self.odpovida():
                         for adresa in self.vyhybky:
                             self._dotaz_vyhybka(adresa)
+                    # Dotaz zároveň obnoví přihlášení k hlášením lokomotivy (Z21 jich drží jen několik posledních)
+                    for adresa in self.sledovane_lokomotivy:
+                        self._dotaz_loko(adresa)
                     posledni_prihlaseni = time.time()
                 if time.time() - posledni_dotaz_stav >= Z21_STAV_INTERVAL:
                     self._dotaz_stav()
@@ -288,6 +304,9 @@ class Z21:
                     for adresa in self.vyhybky:
                         if self.vyhybky[adresa]["stav"] is None:
                             self._dotaz_vyhybka(adresa)
+                    for adresa in self.sledovane_lokomotivy:
+                        if adresa not in self._loko_info:
+                            self._dotaz_loko(adresa)
                     posledni_dotaz_stav = time.time()
                 self._opakuj()
                 data, _ = self.udp_sock.recvfrom(1024)
@@ -326,7 +345,8 @@ class Z21:
             # LAN_X_LOCO_INFO: 0xEF, Adr_MSB, Adr_LSB, 0000BFFF (FFF = 4 -> 128 kroků), RVVVVVVV, ...
             elif x == 0xEF and len(zprava) >= 5:
                 adresa = ((zprava[1] & 0x3F) << 8) | zprava[2]
-                self._loko_info(adresa, zprava[4] & 0x7F, 1 if zprava[4] & 0x80 else 0, (zprava[3] & 0x07) == 4)
+                self._loko_info[adresa] = zprava
+                self._jizda_info(adresa, zprava[4] & 0x7F, 1 if zprava[4] & 0x80 else 0, (zprava[3] & 0x07) == 4)
                 self._loko_funkce(adresa, zprava)
             # LAN_X_BC_TRACK_POWER_OFF / _ON / _SHORT_CIRCUIT
             elif x == 0x61 and len(zprava) >= 2:
@@ -382,7 +402,7 @@ class Z21:
             return rychlost == rychlost_o
         return (rychlost > 0) == (rychlost_o > 0)  # Jiný počet kroků - porovnáme jen jede/stojí
 
-    def _loko_info(self, adresa, rychlost, smer, kroky128):
+    def _jizda_info(self, adresa, rychlost, smer, kroky128):
         """Z21 hlásí stav lokomotivy - potvrdí čekající povel, nebo zapíše změnu z jiného ovladače."""
         predchozi = self.lokomotivy_z21.get(adresa)
         self.lokomotivy_z21[adresa] = (rychlost, smer)

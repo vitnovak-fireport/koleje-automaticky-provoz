@@ -5,7 +5,8 @@ import threading
 from flask import Flask, jsonify, request, send_from_directory
 from waitress import create_server
 
-from automaticky_provoz import Provoz, VYCHOZI_NASTAVENI, LOKOMOTIVY, VYHYBKY, CESTY, MQTT_BROKER, Z21_IP
+from automaticky_provoz import Provoz, VYCHOZI_NASTAVENI, LOKOMOTIVY, VYHYBKY, CESTY, MQTT_BROKER, Z21_IP, \
+    OSVETLENI_TUNELU
 
 # ==========================================
 # KONFIGURACE WEBU (proměnné prostředí)
@@ -108,6 +109,7 @@ def stav():
         "vyhybky": {str(k): v for k, v in provoz.z21.vyhybky.items()},
         "cesta": provoz.cesta(),
         "vyhybky_koleje": VYHYBKY_KOLEJE,
+        "osvetleni_tunelu": provoz.z21.stav_funkce(*OSVETLENI_TUNELU),
         "uceni": {str(k): v for k, v in provoz.uceni.items()},
         "nastaveni": provoz.nastaveni,
         "lokomotivy": {str(k): v["nazev"] for k, v in LOKOMOTIVY.items()},
@@ -221,6 +223,7 @@ def view_stav():
         "vyhybky": {str(k): v for k, v in provoz.z21.vyhybky.items()},
         "cesta": provoz.cesta(),
         "vyhybky_koleje": VYHYBKY_KOLEJE,
+        "osvetleni_tunelu": provoz.z21.stav_funkce(*OSVETLENI_TUNELU),
         "lokomotivy": lokomotivy,
         "mereni": provoz.z21.mereni_napajeni(),
         "log": [z for z in provoz.log if not z[1].startswith(SKRYTE_ZPRAVY)][-30:],
