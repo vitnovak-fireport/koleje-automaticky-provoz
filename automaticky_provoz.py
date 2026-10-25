@@ -1,5 +1,4 @@
 import paho.mqtt.client as mqtt
-import base64
 import json
 import os
 import threading
@@ -8,6 +7,7 @@ from collections import deque
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from tlacitko import Tlacitko
 from z21 import Z21, NAPAJENI_ZAPNUTO
 
 # ==========================================
@@ -24,9 +24,6 @@ TLACITKO_MQTT_PORT = int(os.environ.get("TLACITKO_MQTT_PORT", "8883"))  # TLS
 TLACITKO_MQTT_USER = os.environ.get("TLACITKO_MQTT_USER", "")
 TLACITKO_MQTT_PASS = os.environ.get("TLACITKO_MQTT_PASS", "")  # API klíč TTI (čtení uplinků, zápis downlinků)
 TLACITKO_MQTT_TOPIC = os.environ.get("TLACITKO_MQTT_TOPIC", "")  # Topic uplinků, např. v3/<aplikace>@<tenant>/devices/+/up
-TLACITKO_ZAPNUTE = all((TLACITKO_MQTT_BROKER, TLACITKO_MQTT_USER, TLACITKO_MQTT_PASS, TLACITKO_MQTT_TOPIC))
-TLACITKO_OPCODE_ALARM = 0x01  # OpCode stisku v payloadu tlačítka (0x00 = heartbeat)
-TLACITKO_ALARM_PAMET = 60  # s - opakovaný alarm se stejným Alarm ID během této doby je tentýž stisk
 HOUKANI_DELKA = 2  # s - jak dlouho houkačka zní
 HOUKANI_PAUZA = 10  # s - nejkratší rozestup houkání z tlačítka
 
@@ -116,13 +113,6 @@ class Provoz:
         self.ceka_na_tlacitko = False  # Oba vlaky stojí ve stanici a čekají na stisk (režim na tlačítko)
         self._vyjezd = threading.Event()  # Stisk tlačítka, který vypraví další vlak
 
-        # Tlačítko pro kolemjdoucí
-        self.tlacitko_pripojeno = False
-        self.tlacitko_stisky = 0  # Počet stisků dnes
-        self._tlacitko_den = None
-        self.tlacitko_posledni = None  # Čas posledního stisku HH:MM:SS
-        self.tlacitko_baterie = None  # Napětí baterie tlačítka (V)
-        self._alarmy = {}  # Alarm ID -> time.time() poslední zprávy s ním (tlačítko alarm opakuje)
         self._houkani_cas = 0.0
 
         self._stop = threading.Event()
@@ -136,10 +126,9 @@ class Provoz:
         self.client.on_disconnect = self.on_disconnect
         self.client.on_message = self.on_message
 
-        self.tlacitko_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-        self.tlacitko_client.on_connect = self.tlacitko_on_connect
-        self.tlacitko_client.on_disconnect = self.tlacitko_on_disconnect
-        self.tlacitko_client.on_message = self.tlacitko_on_message
+        # Tlačítko pro kolemjdoucí (LoRaWAN přes MQTT The Things Industries)
+        self.tlacitko = Tlacitko(TLACITKO_MQTT_BROKER, TLACITKO_MQTT_PORT, TLACITKO_MQTT_USER, TLACITKO_MQTT_PASS,
+                                 TLACITKO_MQTT_TOPIC, self.zapis, self.stisk_tlacitka, casova_zona=CASOVA_ZONA)
 
     def zapis(self, zprava):
         """Vypíše zprávu do konzole a uloží ji do logu pro webové rozhraní."""
@@ -251,79 +240,8 @@ class Provoz:
             self.zapis(f"Chyba při zpracování zprávy MQTT: {e}")
 
     # ==========================================
-    # 3b. TLAČÍTKO PRO KOLEMJDOUCÍ (LoRaWAN přes MQTT The Things Industries)
+    # 3b. TLAČÍTKO PRO KOLEMJDOUCÍ (příjem zpráv je v tlacitko.py)
     # ==========================================
-    def pripojit_tlacitko(self):
-        """Připojí se k MQTT tlačítka na pozadí. Bez proměnných TLACITKO_MQTT_* je tlačítko vypnuté."""
-        if not TLACITKO_ZAPNUTE:
-            self.zapis("Tlačítko je vypnuté (chybí TLACITKO_MQTT_BROKER, _USER, _PASS nebo _TOPIC).")
-            return
-        self.tlacitko_client.username_pw_set(TLACITKO_MQTT_USER, TLACITKO_MQTT_PASS)
-        self.tlacitko_client.tls_set()
-        self.tlacitko_client.connect_async(TLACITKO_MQTT_BROKER, TLACITKO_MQTT_PORT, 60)
-        self.tlacitko_client.loop_start()
-
-    def tlacitko_on_connect(self, client, userdata, flags, reason_code, properties):
-        self.zapis(f"Připojeno k MQTT tlačítka {TLACITKO_MQTT_BROKER} s kódem {reason_code}")
-        self.tlacitko_pripojeno = not reason_code.is_failure
-        client.subscribe(TLACITKO_MQTT_TOPIC)
-
-    def tlacitko_on_disconnect(self, client, userdata, flags, reason_code, properties):
-        self.zapis(f"Odpojeno od MQTT tlačítka ({reason_code})")
-        self.tlacitko_pripojeno = False
-
-    def tlacitko_on_message(self, client, userdata, msg):
-        """Uplink tlačítka. Stisk je OpCode Alarm, ostatní zprávy (heartbeat) jen zapíšeme.
-        Prázdné uplinky (tlačítko je posílá po přijetí downlinku) přeskočíme."""
-        try:
-            uplink = json.loads(msg.payload.decode("utf-8"))["uplink_message"]
-            data = base64.b64decode(uplink.get("frm_payload", ""))
-            if not data:
-                return
-            napeti, opcode, alarm_id = self.dekoduj_tlacitko(data)
-            if napeti is not None:
-                self.tlacitko_baterie = napeti
-            if opcode != TLACITKO_OPCODE_ALARM:
-                self.zapis(f"Tlačítko poslalo zprávu bez stisku ({data.hex()}), baterie {napeti} V.")
-                return
-            if alarm_id is None:  # Bez Alarm ID nejde alarm potvrdit ani poznat opakování
-                self.stisk_tlacitka()
-                return
-            self._potvrd_alarm(msg.topic, alarm_id)
-            ted = time.time()
-            self._alarmy = {a: t for a, t in self._alarmy.items() if ted - t < TLACITKO_ALARM_PAMET}
-            novy = alarm_id not in self._alarmy
-            self._alarmy[alarm_id] = ted
-            if novy:
-                self.stisk_tlacitka()
-        except Exception as e:
-            self.zapis(f"Chyba při zpracování zprávy tlačítka: {e}")
-
-    @staticmethod
-    def dekoduj_tlacitko(data):
-        """
-        Payload Mutelcor LoRaButton (podle dekodéru výrobce): verze (1 B), napětí v 10 mV (2 B), OpCode (1 B),
-        u alarmu pak [maska tlačítek (1 B)] [Alarm ID (2 B)] [UID ...].
-        Vrací (napětí ve V, OpCode, Alarm ID), chybějící údaje jako None.
-        """
-        napeti = int.from_bytes(data[1:3], "big") / 100 if len(data) >= 3 else None
-        opcode = data[3] if len(data) >= 4 else None
-        alarm_id = None
-        if opcode == TLACITKO_OPCODE_ALARM:
-            pos = 4
-            if pos < len(data) and pos + 2 != len(data):
-                pos += 1  # Maska stisknutých tlačítek
-            if pos + 1 < len(data):
-                alarm_id = int.from_bytes(data[pos:pos + 2], "big")
-        return napeti, opcode, alarm_id
-
-    def _potvrd_alarm(self, topic, alarm_id):
-        """Potvrdí alarm downlinkem 02 60 AlarmID, jinak ho tlačítko každých 10 s opakuje.
-        Downlink nahradí čekající ve frontě TTI, aby se při opakování nehromadily."""
-        payload = base64.b64encode(bytes([0x02, 0x60]) + alarm_id.to_bytes(2, "big")).decode()
-        topic_down = topic.removesuffix("/up") + "/down/replace"
-        self.tlacitko_client.publish(topic_down, json.dumps({"downlinks": [{"f_port": 1, "frm_payload": payload}]}), qos=1)
-
     def stisk_tlacitka(self):
         """
         Někdo stiskl tlačítko. Podle situace:
@@ -331,11 +249,7 @@ class Provoz:
         2. vlak jede přes segment 1 a ještě nezpomaluje před zastávkou -> zastaví na znamení,
         3. jinak zahouká jedoucí lokomotiva (nebo ta, která vyjede příště).
         """
-        dnes = datetime.now(CASOVA_ZONA).date()
-        if dnes != self._tlacitko_den:
-            self._tlacitko_den, self.tlacitko_stisky = dnes, 0
-        self.tlacitko_stisky += 1
-        self.tlacitko_posledni = self.ted()
+        self.tlacitko.zapocitej_stisk()
 
         if self.bezi() and self.ceka_na_tlacitko:
             self.zapis(f"Tlačítko: vypravuji vlak {self.nazev(self._pristi_loko())}.")
@@ -679,7 +593,7 @@ class Provoz:
 if __name__ == "__main__":
     provoz = Provoz()
     provoz.pripojit_mqtt()
-    provoz.pripojit_tlacitko()
+    provoz.tlacitko.pripojit()
     provoz.z21.pripojit()
     provoz.spustit()
 

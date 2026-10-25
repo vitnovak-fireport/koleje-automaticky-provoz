@@ -10,7 +10,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
-COPY automaticky_provoz.py z21.py app.py ./
+COPY automaticky_provoz.py z21.py tlacitko.py app.py ./
 COPY static ./static
 
 VOLUME /data

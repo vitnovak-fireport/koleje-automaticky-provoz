@@ -5,8 +5,7 @@ import threading
 from flask import Flask, jsonify, request, send_from_directory
 from waitress import create_server
 
-from automaticky_provoz import (Provoz, VYCHOZI_NASTAVENI, LOKOMOTIVY, VYHYBKY, CESTY, MQTT_BROKER, Z21_IP,
-                                TLACITKO_ZAPNUTE)
+from automaticky_provoz import Provoz, VYCHOZI_NASTAVENI, LOKOMOTIVY, VYHYBKY, CESTY, MQTT_BROKER, Z21_IP
 
 # ==========================================
 # KONFIGURACE WEBU (proměnné prostředí)
@@ -118,12 +117,12 @@ def stav():
 
 def stav_tlacitka():
     return {
-        "zapnute": TLACITKO_ZAPNUTE,
-        "pripojeno": provoz.tlacitko_pripojeno,
+        "zapnute": provoz.tlacitko.zapnute,
+        "pripojeno": provoz.tlacitko.pripojeno,
         "ceka": provoz.ceka_na_tlacitko,
-        "stisky_dnes": provoz.tlacitko_stisky,
-        "posledni": provoz.tlacitko_posledni,
-        "baterie_v": provoz.tlacitko_baterie,
+        "stisky_dnes": provoz.tlacitko.stisky,
+        "posledni": provoz.tlacitko.posledni,
+        "baterie_v": provoz.tlacitko.baterie,
     }
 
 
@@ -214,9 +213,9 @@ def view_stav():
         "zastavka": n["zastavka"],
         "rezim": n["rezim"],
         "tlacitko": {
-            "zapnute": TLACITKO_ZAPNUTE,
+            "zapnute": provoz.tlacitko.zapnute,
             "ceka": provoz.ceka_na_tlacitko,
-            "stisky_dnes": provoz.tlacitko_stisky,
+            "stisky_dnes": provoz.tlacitko.stisky,
         },
         "segmenty": {str(k): v for k, v in provoz.segments.items()},
         "vyhybky": {str(k): v for k, v in provoz.z21.vyhybky.items()},
@@ -230,7 +229,7 @@ def view_stav():
 
 if __name__ == "__main__":
     provoz.pripojit_mqtt()
-    provoz.pripojit_tlacitko()
+    provoz.tlacitko.pripojit()
     provoz.z21.pripojit()
     if AUTOSTART:
         provoz.spustit()
