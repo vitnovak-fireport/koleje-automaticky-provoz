@@ -68,11 +68,33 @@ sudo loginctl enable-linger $USER
 | `MQTT_TOPIC` | `koleje/segment/+` | Topic obsazení |
 | `WEB_PORT` | `8081` | Port ovládání |
 | `VIEW_PORT` | `8082` | Port sledování jen pro čtení |
-| `ZASTAVKA_POVOLENA` | `1` | Výchozí stav zastávky (`1`/`0`), pokud ještě není uložené nastavení |
+| `ZASTAVKA_POVOLENA` | `1` | Výchozí stav zastávky (`1` = vlaky zastaví, `0` = projedou), pokud ještě není uložené nastavení |
+| `TLACITKO_MQTT_BROKER` | *(prázdné)* | MQTT The Things Industries s LoRaWAN tlačítkem |
+| `TLACITKO_MQTT_PORT` | `8883` | Port MQTT tlačítka (TLS) |
+| `TLACITKO_MQTT_USER` | *(prázdné)* | Uživatel MQTT tlačítka (`<aplikace>@<tenant>` v TTI) |
+| `TLACITKO_MQTT_PASS` | *(prázdné)* | API klíč TTI – čtení uplinků a zápis downlinků |
+| `TLACITKO_MQTT_TOPIC` | *(prázdné)* | Topic uplinků tlačítka, např. `v3/<aplikace>@<tenant>/devices/+/up` |
+
+Bez `TLACITKO_MQTT_BROKER`, `_USER`, `_PASS` a `_TOPIC` je tlačítko vypnuté.
 | `AUTOSTART` | `0` | `1` = po startu kontejneru rovnou rozjet provoz |
 | `CASOVA_ZONA` | `Europe/Prague` | Časové pásmo pro časy v záznamu a u výhybek (nezávisle na čase systému) |
 
 Rychlosti, adresy lokomotiv a zastávku jde měnit ve webu za běhu; ukládají se do `/data/nastaveni.json`.
+
+## Tlačítko pro kolemjdoucí
+
+LoRaWAN tlačítko Mutelcor MTC-PB01 posílá stisk přes The Things Industries. Aplikace každý alarm potvrdí
+downlinkem (jinak ho tlačítko opakuje) a opakované zprávy se stejným Alarm ID bere jako jeden stisk.
+Heartbeat jen zapíše do záznamu. Stisk podle situace:
+
+1. V režimu **na tlačítko** čekají oba vlaky ve stanici – vyjede ten, který stojí nejdéle.
+2. Zastávka je **na znamení** a vlak jede přes segment 1, ale ještě nevjel do segmentu 2 – zastaví na zastávce.
+3. Jinak lokomotiva zahouká (funkce `houkacka` v `LOKOMOTIVY` v `automaticky_provoz.py`).
+
+Přístupové údaje předej jen proměnnými prostředí, do `podman run` přidej `-e TLACITKO_MQTT_BROKER=…
+-e TLACITKO_MQTT_USER=… -e TLACITKO_MQTT_PASS=… -e TLACITKO_MQTT_TOPIC=…` (nebo je dej do souboru a použij
+`--env-file`, který necommituj).
+V ovládání jde tlačítko vyzkoušet i z webu.
 
 ## Bez kontejneru
 

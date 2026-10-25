@@ -5,7 +5,8 @@ import threading
 from flask import Flask, jsonify, request, send_from_directory
 from waitress import create_server
 
-from automaticky_provoz import Provoz, VYCHOZI_NASTAVENI, LOKOMOTIVY, VYHYBKY, CESTY, MQTT_BROKER, Z21_IP
+from automaticky_provoz import (Provoz, VYCHOZI_NASTAVENI, LOKOMOTIVY, VYHYBKY, CESTY, MQTT_BROKER, Z21_IP,
+                                TLACITKO_ZAPNUTE)
 
 # ==========================================
 # KONFIGURACE WEBU (proměnné prostředí)
@@ -31,12 +32,20 @@ ROZSAHY = {
     "zastavka_rychlost_dojezdu": (0, 127),
 }
 
+# Nastavení s výběrem z pevných možností
+MOZNOSTI = {
+    "rezim": ("nepretrzity", "na_tlacitko"),
+    "zastavka": ("ano", "ne", "na_znameni"),
+}
+
 
 def nacti_nastaveni():
     """Načte uložené nastavení (soubor v DATA_DIR přežije restart kontejneru)."""
     try:
         with open(SOUBOR_NASTAVENI, encoding="utf-8") as f:
             ulozene = json.load(f)
+        if "zastavka_povolena" in ulozene and "zastavka" not in ulozene:  # Nastavení ze starší verze
+            ulozene["zastavka"] = "ano" if ulozene["zastavka_povolena"] else "ne"
         return {k: v for k, v in ulozene.items() if k in VYCHOZI_NASTAVENI}
     except (OSError, ValueError):
         return {}
@@ -52,9 +61,9 @@ def over_nastaveni(data):
     """Zkontroluje změny nastavení z webu. Vrací (změny, chyba)."""
     zmeny = {}
     for klic, hodnota in data.items():
-        if klic == "zastavka_povolena":
-            if not isinstance(hodnota, bool):
-                return None, "zastavka_povolena musí být true/false"
+        if klic in MOZNOSTI:
+            if hodnota not in MOZNOSTI[klic]:
+                return None, f"{klic} musí být jedno z {', '.join(MOZNOSTI[klic])}"
             zmeny[klic] = hodnota
         elif klic in ("loco_seg3", "loco_seg4"):
             if hodnota not in LOKOMOTIVY or isinstance(hodnota, bool):
@@ -90,6 +99,7 @@ def stav():
         "faze": provoz.faze,
         "zastavit_ve_stanici": provoz.zastavit_ve_stanici,
         "mqtt_pripojeno": provoz.mqtt_pripojeno,
+        "tlacitko": stav_tlacitka(),
         "z21_odpovida": provoz.z21_odpovida(),
         "napajeni": provoz.napajeni,
         "mereni": provoz.mereni_napajeni(),
@@ -101,9 +111,20 @@ def stav():
         "vyhybky_koleje": VYHYBKY_KOLEJE,
         "uceni": {str(k): v for k, v in provoz.uceni.items()},
         "nastaveni": provoz.nastaveni,
-        "lokomotivy": {str(k): v for k, v in LOKOMOTIVY.items()},
+        "lokomotivy": {str(k): v["nazev"] for k, v in LOKOMOTIVY.items()},
         "log": list(provoz.log)[-60:],
     })
+
+
+def stav_tlacitka():
+    return {
+        "zapnute": TLACITKO_ZAPNUTE,
+        "pripojeno": provoz.tlacitko_pripojeno,
+        "ceka": provoz.ceka_na_tlacitko,
+        "stisky_dnes": provoz.tlacitko_stisky,
+        "posledni": provoz.tlacitko_posledni,
+        "baterie_v": provoz.tlacitko_baterie,
+    }
 
 
 @app.post("/api/spustit")
@@ -123,6 +144,14 @@ def zastavit_ve_stanici():
     if provoz.bezi():
         provoz.zastavit_ve_stanici = True
         provoz.zapis("Provoz se ukončí, až vlak dojede do stanice.")
+    return jsonify(ok=True)
+
+
+@app.post("/api/tlacitko")
+def tlacitko():
+    """Stisk tlačítka z webu - na vyzkoušení bez chůze k tlačítku."""
+    provoz.zapis("Tlačítko stisknuto z ovládání.")
+    provoz.stisk_tlacitka()
     return jsonify(ok=True)
 
 
@@ -154,7 +183,8 @@ def nastaveni():
 view_app = Flask(__name__, static_folder=None)
 
 # Zprávy, které do veřejného sledování nepatří (nastavení, adresy serverů, chyby)
-SKRYTE_ZPRAVY = ("Nastavení změněno", "Připojeno k MQTT", "Odpojeno od MQTT", "Chyba")
+SKRYTE_ZPRAVY = ("Nastavení změněno", "Připojeno k MQTT", "Odpojeno od MQTT", "Chyba",
+                 "Tlačítko poslalo", "Tlačítko je vypnuté", "Tlačítko stisknuto z ovládání")
 
 
 @view_app.get("/")
@@ -174,14 +204,20 @@ def view_stav():
     for loco, kolej in ((n["loco_seg3"], 3), (n["loco_seg4"], 4)):
         lokomotivy.append({
             "adresa": loco,
-            "jmeno": LOKOMOTIVY.get(loco, f"Lokomotiva {loco}"),
+            "jmeno": LOKOMOTIVY[loco]["nazev"] if loco in LOKOMOTIVY else f"Lokomotiva {loco}",
             "kolej": kolej,
             "rychlost": provoz.rychlosti.get(loco, 0),
         })
     return jsonify({
         "bezi": provoz.bezi(),
         "faze": provoz.faze,
-        "zastavka_povolena": n["zastavka_povolena"],
+        "zastavka": n["zastavka"],
+        "rezim": n["rezim"],
+        "tlacitko": {
+            "zapnute": TLACITKO_ZAPNUTE,
+            "ceka": provoz.ceka_na_tlacitko,
+            "stisky_dnes": provoz.tlacitko_stisky,
+        },
         "segmenty": {str(k): v for k, v in provoz.segments.items()},
         "vyhybky": {str(k): v for k, v in provoz.vyhybky.items()},
         "cesta": provoz.cesta(),
@@ -194,6 +230,7 @@ def view_stav():
 
 if __name__ == "__main__":
     provoz.pripojit_mqtt()
+    provoz.pripojit_tlacitko()
     provoz.pripojit_z21()
     if AUTOSTART:
         provoz.spustit()

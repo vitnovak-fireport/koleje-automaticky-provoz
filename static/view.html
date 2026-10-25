@@ -24,6 +24,11 @@
     <div class="faze" id="faze">Načítám…</div>
   </section>
 
+  <section class="card hidden" id="tlacitko">
+    <h2>Tlačítko u kolejiště</h2>
+    <div class="muted" id="tlacitko-info"></div>
+  </section>
+
   <section class="card">
     <h2>Kolejiště</h2>
     <div class="kolejiste" id="kolejiste"></div>
@@ -72,8 +77,14 @@
     $("chip-spojeni").classList.add("hidden");
     $("chip-provoz").textContent = s.bezi ? "Provoz běží" : "Provoz stojí";
     $("chip-provoz").className = "chip " + (s.bezi ? "on" : "");
-    $("chip-zastavka").textContent = s.zastavka_povolena ? "Zastávka v provozu" : "Zastávka mimo provoz";
+    $("chip-zastavka").textContent = {
+      ano: "Zastávka v provozu", na_znameni: "Zastávka na znamení", ne: "Zastávka mimo provoz",
+    }[s.zastavka];
     $("faze").textContent = s.faze;
+    const t = s.tlacitko;
+    $("tlacitko").classList.toggle("hidden", !t.zapnute);
+    $("tlacitko-info").textContent = (t.ceka ? "Vlaky čekají ve stanici – stiskni tlačítko a jeden vyjede! " : "")
+      + `Dnes tlačítko stisklo ${t.stisky_dnes}×.`;
 
     vykresliKolejiste($("kolejiste"), s.segmenty,
       Object.fromEntries(s.lokomotivy.map((l) => [l.kolej, l.jmeno])), s.vyhybky, s.vyhybky_koleje);

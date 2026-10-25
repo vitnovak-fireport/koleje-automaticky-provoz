@@ -14,6 +14,7 @@
   <div class="chips">
     <span class="chip" id="chip-provoz">Automat …</span>
     <span class="chip" id="chip-mqtt">MQTT …</span>
+    <span class="chip" id="chip-tlacitko">Tlačítko …</span>
     <span class="chip" id="chip-z21">Z21 …</span>
     <span class="chip hidden" id="chip-napajeni">Kolejiště …</span>
     <span class="chip hidden off" id="chip-spojeni">Server nedostupný</span>
@@ -59,14 +60,31 @@
       <button class="danger" id="btn-zastavit">ZASTAVIT HNED</button>
     </div>
   </section>
+
+  <section class="card">
+    <h2>Tlačítko pro kolemjdoucí</h2>
+    <div class="muted" id="tlacitko-info">–</div>
+    <div class="tlacitka" style="margin-top:10px">
+      <button id="btn-tlacitko">Stisknout tlačítko</button>
+    </div>
+  </section>
   </div>
 
   <div class="sloupec-b">
   <section class="card">
     <h2>Nastavení</h2>
     <form id="form">
+      <label class="radek">Provoz
+        <select name="rezim" data-typ="text">
+          <option value="nepretrzity">nepřetržitý</option>
+          <option value="na_tlacitko">na tlačítko</option>
+        </select></label>
       <label class="radek">Zastávka mezi segmenty 1 a 2
-        <input type="checkbox" name="zastavka_povolena"></label>
+        <select name="zastavka" data-typ="text">
+          <option value="ano">vlaky zastaví</option>
+          <option value="na_znameni">na znamení (tlačítkem)</option>
+          <option value="ne">vlaky projedou</option>
+        </select></label>
       <label class="radek">Stání na zastávce (s)
         <input type="number" name="zastavka_cekani" min="0" max="600"></label>
       <label class="radek">Plíživá rychlost před zastávkou
@@ -155,6 +173,14 @@
     const mqtt = $("chip-mqtt");
     mqtt.textContent = s.mqtt_pripojeno ? "MQTT připojeno" : "MQTT odpojeno";
     mqtt.className = "chip " + (s.mqtt_pripojeno ? "on" : "off");
+    const t = s.tlacitko;
+    $("chip-tlacitko").textContent = !t.zapnute ? "Tlačítko vypnuté" : t.pripojeno ? "Tlačítko připojeno" : "Tlačítko odpojeno";
+    $("chip-tlacitko").className = "chip " + (!t.zapnute ? "" : t.pripojeno ? "on" : "off");
+    $("tlacitko-info").textContent = [
+      t.ceka ? "Vlaky čekají na stisk." : null,
+      `Dnes stisknuto ${t.stisky_dnes}×` + (t.posledni ? `, naposledy v ${t.posledni}` : ""),
+      t.baterie_v != null ? `Baterie ${t.baterie_v.toLocaleString("cs-CZ")} V` : null,
+    ].filter(Boolean).join(" · ");
     $("chip-z21").textContent = s.z21_odpovida ? "Z21 odpovídá" : "Z21 neodpovídá";
     $("chip-z21").className = "chip " + (s.z21_odpovida ? "on" : "off");
     const napajeni = $("chip-napajeni");
@@ -226,6 +252,7 @@
   };
   $("btn-ve-stanici").onclick = async () => { await post("/api/zastavit-ve-stanici"); obnov(); };
   $("btn-zastavit").onclick = async () => { await post("/api/zastavit"); obnov(); };
+  $("btn-tlacitko").onclick = async () => { await post("/api/tlacitko"); obnov(); };
   $("btn-zapomenout").onclick = async () => {
     if (confirm("Smazat naučené směry vlaků?")) { await post("/api/zapomenout"); obnov(); }
   };
@@ -235,7 +262,7 @@
     const data = {};
     for (const el of form.elements) {
       if (!el.name) continue;
-      data[el.name] = el.type === "checkbox" ? el.checked : parseInt(el.value, 10);
+      data[el.name] = el.type === "checkbox" ? el.checked : el.dataset.typ === "text" ? el.value : parseInt(el.value, 10);
     }
     const r = await post("/api/nastaveni", data);
     $("zprava").textContent = r.ok ? "Uloženo." : "Chyba: " + r.chyba;
