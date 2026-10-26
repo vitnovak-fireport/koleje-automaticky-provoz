@@ -29,6 +29,7 @@ ROZSAHY = {
     "speed_seg4": (0, 127),
     "rychlost_vjezdu": (0, 127),
     "zastavka_cekani": (0, 600),
+    "vyjezd_bez_tlacitka": (0, 3600),
     "zastavka_rychlost_dojezdu": (0, 127),
 }
 

@@ -67,6 +67,7 @@ VYCHOZI_NASTAVENI = {
 
     # Provoz: "nepretrzity" = vlaky se střídají pořád, "na_tlacitko" = další vlak vyjede až po stisku tlačítka
     "rezim": "nepretrzity",
+    "vyjezd_bez_tlacitka": 60,  # Po kolika s vyjede vlak i bez stisku tlačítka (0 = čekat na stisk neomezeně)
 
     # Zastávka na předělu segmentů 1 a 2 (jen pro vlaky, které ze stanice vjedou nejdříve do segmentu 1)
     # "ano" = vlaky zastaví, "ne" = projedou, "na_znameni" = zastaví, jen když někdo stiskne tlačítko
@@ -384,20 +385,25 @@ class Provoz:
         return self._cekej_na_tlacitko(pristi)
 
     def _cekej_na_tlacitko(self, pristi):
-        """V režimu na tlačítko počká na stisk a vrátí stav výjezdu vlaku, který stojí nejdéle.
-        Jinak (i po přepnutí do nepřetržitého provozu během čekání) vrátí pristi."""
+        """V režimu na tlačítko počká na stisk (nejdéle vyjezd_bez_tlacitka s) a vrátí stav výjezdu vlaku,
+        který stojí nejdéle. Jinak (i po přepnutí do nepřetržitého provozu během čekání) vrátí pristi."""
         if self.nastaveni["rezim"] != "na_tlacitko":
             return pristi
         self._vyjezd.clear()
         self.ceka_na_tlacitko = True
         self.faze = "Čeká na stisk tlačítka"
         self.zapis("Oba vlaky stojí ve stanici, čekám na stisk tlačítka.")
+        zacatek = time.time()
         try:
             while not self._vyjezd.is_set():
                 if self.zastavit_ve_stanici:
                     return None
                 if self.nastaveni["rezim"] != "na_tlacitko":
                     return pristi
+                limit = self.nastaveni["vyjezd_bez_tlacitka"]  # Dá se měnit z webu i během čekání
+                if limit and time.time() - zacatek >= limit:
+                    self.zapis(f"Nikdo nestiskl tlačítko {limit} s, vypravuji vlak {self.nazev(self._pristi_loko())}.")
+                    break
                 self._cekej(0.2)
         finally:
             self.ceka_na_tlacitko = False

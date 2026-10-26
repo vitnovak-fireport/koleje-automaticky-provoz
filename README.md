@@ -89,7 +89,8 @@ LoRaWAN tlačítko Mutelcor MTC-PB01 posílá stisk přes The Things Industries.
 downlinkem (jinak ho tlačítko opakuje) a opakované zprávy se stejným Alarm ID bere jako jeden stisk.
 Heartbeat jen zapíše do záznamu. Stisk podle situace:
 
-1. V režimu **na tlačítko** čekají oba vlaky ve stanici – vyjede ten, který stojí nejdéle.
+1. V režimu **na tlačítko** čekají oba vlaky ve stanici – vyjede ten, který stojí nejdéle. Když nikdo
+   nestiskne, vyjede sám po době nastavené v ovládání (výchozí 60 s, 0 = čekat na stisk neomezeně).
 2. Zastávka je **na znamení** a vlak jede přes segment 1, ale ještě nevjel do segmentu 2 – zastaví na zastávce.
 3. Jinak lokomotiva zahouká (funkce `houkacka` v `LOKOMOTIVY` v `automaticky_provoz.py`).
 
