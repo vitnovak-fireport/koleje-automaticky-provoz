@@ -1,6 +1,7 @@
 import os
 import threading
 import time
+import urllib.request
 from collections import deque
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -25,6 +26,10 @@ TLACITKO_MQTT_PASS = os.environ.get("TLACITKO_MQTT_PASS", "")  # API klíč TTI 
 TLACITKO_MQTT_TOPIC = os.environ.get("TLACITKO_MQTT_TOPIC", "")  # Topic uplinků, např. v3/<aplikace>@<tenant>/devices/+/up
 HOUKANI_DELKA = 2  # s - jak dlouho houkačka zní
 HOUKANI_PAUZA = 10  # s - nejkratší rozestup houkání z tlačítka
+
+# Mikroslužba pro přehrávání zvuku do reproduktoru (jen v režimu na tlačítko u vlaku vypraveného stiskem)
+ZVUK_URL = os.environ.get("ZVUK_URL", "http://localhost:8080")
+ZVUK_TIMEOUT = 3  # s
 
 Z21_IP = os.environ.get("Z21_IP", "192.168.0.111")
 Z21_PORT = int(os.environ.get("Z21_PORT", "21105"))  # Časování a protokol Z21 jsou v z21.py
@@ -104,6 +109,8 @@ class Provoz:
         self.navrat = {}  # Lokomotiva -> time.time() posledního návratu do stanice
         self.ceka_na_tlacitko = False  # Oba vlaky stojí ve stanici a čekají na stisk (režim na tlačítko)
         self._vyjezd = threading.Event()  # Stisk tlačítka, který vypraví další vlak
+        self.jizda_tlacitkem = False  # Jedoucí vlak vypravil stisk tlačítka (ne vyjezd_bez_tlacitka) - hrají zvuky
+        self._hlaseni_zastavky = False  # Při vjezdu do segmentu 1 ještě ohlásit zastávku na znamení
 
         self._houkani_cas = 0.0
 
@@ -203,6 +210,19 @@ class Provoz:
         return True
 
     # ==========================================
+    # 2b. ZVUKY DO REPRODUKTORU (mikroslužba ZVUK_URL)
+    # ==========================================
+    def prehraj(self, cesta):
+        """Na pozadí zavolá mikroslužbu pro přehrávání zvuku, např. cesta="/play". Chyba provoz nezastaví."""
+        def volej():
+            try:
+                with urllib.request.urlopen(ZVUK_URL + cesta, timeout=ZVUK_TIMEOUT):
+                    pass
+            except Exception as e:
+                self.zapis(f"Zvuk {cesta} se nepodařilo přehrát: {e}")
+        threading.Thread(target=volej, daemon=True).start()
+
+    # ==========================================
     # 3. TLAČÍTKO PRO KOLEMJDOUCÍ (příjem zpráv je v tlacitko.py)
     # ==========================================
     def stisk_tlacitka(self):
@@ -217,6 +237,7 @@ class Provoz:
         if self.bezi() and self.ceka_na_tlacitko:
             self.zapis(f"Tlačítko: vypravuji vlak {self.nazev(self._pristi_loko())}.")
             self._vyjezd.set()
+            self.prehraj("/play")
             return
 
         loco = self.jedouci_loco
@@ -229,6 +250,8 @@ class Provoz:
                     self.zastavka_pozadana = True
             if mozna:
                 self.zapis(f"Tlačítko: vlak {self.nazev(loco)} zastaví na zastávce na znamení.")
+                if self.jizda_tlacitkem:
+                    self.prehraj("/announce?file=zastavime")
                 return
 
         loco = loco if loco is not None else self._pristi_loko()
@@ -267,6 +290,16 @@ class Provoz:
                 prvni = 1 if segmenty[1] else 2
             info["smer_pres_seg1"] = prvni == 1
             self.zapis(f"Učení: {self.nazev(loco)} vjíždí ze stanice nejdříve do segmentu {prvni}.")
+
+    def ohlas_zastavku(self, loco):
+        """Vlak vypravený tlačítkem vjel ze stanice do segmentu 1 - ohlásí, že může zastavit na znamení."""
+        segmenty = self.obsazenost.segmenty
+        if not self._hlaseni_zastavky or not (segmenty[1] or segmenty[2]):
+            return
+        self._hlaseni_zastavky = False  # Hlásí se jen jednou za jízdu, a to při vjezdu na okruh
+        if (self.nastaveni["zastavka"] == "na_znameni" and self.zastavka_mozna(loco)
+                and not self.zastavka_pozadana):
+            self.prehraj("/announce?file=zastavka-na-znameni")
 
     def ma_zastavku(self, loco):
         """Vlak staví na zastávce, jen pokud vjíždí nejdříve do segmentu 1 a zastávka je v provozu
@@ -360,6 +393,8 @@ class Provoz:
         finally:
             self.jedouci_loco = None
             self.ceka_na_tlacitko = False
+            self.jizda_tlacitkem = False
+            self._hlaseni_zastavky = False
 
     def _vyjizdi(self, loco):
         """Vlak vyjíždí ze stanice - nová jízda, o zastávce zatím nepadlo rozhodnutí."""
@@ -367,10 +402,12 @@ class Provoz:
             self.jedouci_loco = loco
             self.zastavka_rozhodnuta = False
             self.zastavka_pozadana = False
+        self._hlaseni_zastavky = self.jizda_tlacitkem
 
     def _vratil_se(self, loco):
         self.navrat[loco] = time.time()
         self.jedouci_loco = None
+        self.jizda_tlacitkem = False
 
     def _dalsi_vyjezd(self, pristi):
         """
@@ -387,6 +424,7 @@ class Provoz:
     def _cekej_na_tlacitko(self, pristi):
         """V režimu na tlačítko počká na stisk (nejdéle vyjezd_bez_tlacitka s) a vrátí stav výjezdu vlaku,
         který stojí nejdéle. Jinak (i po přepnutí do nepřetržitého provozu během čekání) vrátí pristi."""
+        self.jizda_tlacitkem = False
         if self.nastaveni["rezim"] != "na_tlacitko":
             return pristi
         self._vyjezd.clear()
@@ -407,6 +445,7 @@ class Provoz:
                 self._cekej(0.2)
         finally:
             self.ceka_na_tlacitko = False
+        self.jizda_tlacitkem = self._vyjezd.is_set()  # Vypravil ho stisk, ne vyjezd_bez_tlacitka
         return 0 if self._pristi_loko() == self.nastaveni["loco_seg3"] else 10
 
     def main_loop(self):
@@ -447,6 +486,7 @@ class Provoz:
 
             elif state == 1:
                 self.zjisti_smer(loco3)
+                self.ohlas_zastavku(loco3)
                 # Zpomalit hned při vjezdu čela do segmentu 2, i když konec vlaku ještě opouští stanici
                 if segments[2] == True and not self.zastavka_rozhodnuta and self.rozhodni_zastavku(loco3):
                     zastavka_zpomaleni = self.zpomal_pred_zastavkou(loco3)
@@ -510,6 +550,7 @@ class Provoz:
 
             elif state == 11:
                 self.zjisti_smer(loco4)
+                self.ohlas_zastavku(loco4)
                 # Zpomalit hned při vjezdu čela do segmentu 2, i když konec vlaku ještě opouští stanici
                 if segments[2] == True and not self.zastavka_rozhodnuta and self.rozhodni_zastavku(loco4):
                     zastavka_zpomaleni = self.zpomal_pred_zastavkou(loco4)
