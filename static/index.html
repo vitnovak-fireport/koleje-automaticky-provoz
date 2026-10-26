@@ -160,6 +160,12 @@
     for (const o of s4.options) o.disabled = o.value === s3.value;
   }
 
+  // Výjezd bez stisku tlačítka má smysl jen v režimu na tlačítko
+  function zpristupniVyjezd() {
+    form.elements.vyjezd_bez_tlacitka.disabled = form.elements.rezim.value !== "na_tlacitko";
+  }
+  form.elements.rezim.onchange = zpristupniVyjezd;
+
   async function post(url, data) {
     const r = await fetch(url, {
       method: "POST",
@@ -176,6 +182,7 @@
       else el.value = n[el.name];
     }
     zakazStejnouLokomotivu();
+    zpristupniVyjezd();
   }
 
   function vykresli(s) {
