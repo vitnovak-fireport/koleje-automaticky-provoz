@@ -111,6 +111,7 @@
         <select name="loco_seg3"></select></label>
       <label class="radek">Lokomotiva v segmentu 4
         <select name="loco_seg4"></select></label>
+      <div class="muted hidden" id="loco-zamceno">Lokomotivy jde změnit, až vlak dojede do stanice.</div>
       <div class="tlacitka" style="margin-top:10px">
         <button class="primary" type="submit">Uložit nastavení</button>
       </div>
@@ -249,6 +250,15 @@
       vyplnFormular(s.nastaveni);
       formNacten = true;
     }
+
+    // Během jízdy vlaku po trati nejde lokomotivy měnit - po odemčení ukázat aktuální uložené
+    for (const jmeno of ["loco_seg3", "loco_seg4"]) {
+      const el = form.elements[jmeno];
+      if (!s.lze_menit_lokomotivy) el.value = s.nastaveni[jmeno];
+      el.disabled = !s.lze_menit_lokomotivy;
+    }
+    if (!s.lze_menit_lokomotivy) zakazStejnouLokomotivu();
+    $("loco-zamceno").classList.toggle("hidden", s.lze_menit_lokomotivy);
 
     const uceni = Object.entries(s.uceni).filter(([, v]) => "smer_pres_seg1" in v);
     $("uceni").textContent = uceni.length

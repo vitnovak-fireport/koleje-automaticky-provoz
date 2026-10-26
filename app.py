@@ -80,6 +80,9 @@ def over_nastaveni(data):
             return None, f"Neznámé nastavení: {klic}"
     loco3 = zmeny.get("loco_seg3", provoz.nastaveni["loco_seg3"])
     loco4 = zmeny.get("loco_seg4", provoz.nastaveni["loco_seg4"])
+    meni_lokomotivy = (loco3, loco4) != (provoz.nastaveni["loco_seg3"], provoz.nastaveni["loco_seg4"])
+    if meni_lokomotivy and not provoz.lze_menit_lokomotivy():
+        return None, "Lokomotivy nejde měnit, dokud vlak jede po trati - počkejte, až dojede do stanice"
     if loco3 == loco4:
         return None, "V segmentech 3 a 4 nemůže stát stejná lokomotiva"
     return zmeny, None
@@ -114,6 +117,7 @@ def stav():
         "osvetleni_tunelu": provoz.z21.stav_funkce(*OSVETLENI_TUNELU),
         "uceni": {str(k): v for k, v in provoz.uceni.items()},
         "nastaveni": provoz.nastaveni,
+        "lze_menit_lokomotivy": provoz.lze_menit_lokomotivy(),
         "lokomotivy": {str(k): v["nazev"] for k, v in LOKOMOTIVY.items()},
         "rychlosti": rychlosti_lokomotiv(),
         "log": list(provoz.log)[-60:],

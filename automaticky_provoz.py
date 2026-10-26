@@ -263,6 +263,10 @@ class Provoz:
         if self.zahoukej(loco):
             self.zapis(f"Tlačítko: {self.nazev(loco)} houká.")
 
+    def lze_menit_lokomotivy(self):
+        """Lokomotivy v segmentech jde měnit jen tehdy, když žádný vlak nejede po trati."""
+        return not self.bezi() or self.jedouci_loco is None
+
     def _pristi_loko(self):
         """Lokomotiva, která stojí ve stanici nejdéle (vyjede příště)."""
         loco3, loco4 = self.nastaveni["loco_seg3"], self.nastaveni["loco_seg4"]
