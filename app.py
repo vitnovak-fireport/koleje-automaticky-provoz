@@ -37,6 +37,7 @@ ROZSAHY = {
 MOZNOSTI = {
     "rezim": ("nepretrzity", "na_tlacitko"),
     "zastavka": ("ano", "ne", "na_znameni"),
+    "zvuky": ("ano", "ne"),
 }
 
 

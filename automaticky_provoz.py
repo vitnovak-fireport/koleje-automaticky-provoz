@@ -79,6 +79,9 @@ VYCHOZI_NASTAVENI = {
     "zastavka": "ano" if os.environ.get("ZASTAVKA_POVOLENA", "1") == "1" else "ne",
     "zastavka_cekani": 15,             # Doba stání na zastávce (s)
     "zastavka_rychlost_dojezdu": 30,   # Plíživá rychlost od vjezdu čela do segmentu 2 až do zastavení (0-127)
+
+    # Zvuky do reproduktoru (mikroslužba ZVUK_URL): "ano" = hrají, "ne" = žádné volání
+    "zvuky": "ano",
 }
 
 
@@ -214,6 +217,8 @@ class Provoz:
     # ==========================================
     def prehraj(self, cesta):
         """Na pozadí zavolá mikroslužbu pro přehrávání zvuku, např. cesta="/play". Chyba provoz nezastaví."""
+        if self.nastaveni["zvuky"] != "ano":
+            return
         def volej():
             try:
                 with urllib.request.urlopen(ZVUK_URL + cesta, timeout=ZVUK_TIMEOUT):
