@@ -43,7 +43,8 @@ class Z21:
     def __init__(self, ip, port, vyhybky, zapis, nazev=None, ted=None, lokomotivy=()):
         """
         :param vyhybky: adresy výhybek, jejichž polohu sledujeme
-        :param lokomotivy: adresy dekodérů, jejichž funkce sledujeme i bez povelů ze skriptu (např. osvětlení)
+        :param lokomotivy: adresy dekodérů (nebo funkce vracející adresy), jejichž jízdu a funkce sledujeme i bez
+                           povelů ze skriptu (např. osvětlení, lokomotivy na trati)
         :param zapis: funkce pro zápis zprávy do logu
         :param nazev: funkce, která z adresy lokomotivy udělá jméno pro výpisy
         :param ted: funkce vracející aktuální čas HH:MM:SS (u poloh výhybek)
@@ -56,7 +57,8 @@ class Z21:
         self.rychlosti = {}  # Poslední rychlost odeslaná každé lokomotivě
         self.smery = {}  # Poslední směr odeslaný každé lokomotivě
         self.lokomotivy_z21 = {}  # Rychlost a směr lokomotiv, jak je hlásí Z21: adresa -> (rychlost, směr)
-        self.sledovane_lokomotivy = tuple(lokomotivy)
+        # Adresy sledovaných lokomotiv, nebo funkce, která je vrátí (seznam se může za běhu měnit)
+        self.sledovane_lokomotivy = lokomotivy if callable(lokomotivy) else (lambda: tuple(lokomotivy))
         self._loko_info = {}  # Poslední LAN_X_LOCO_INFO od Z21 podle adresy (nese stav funkcí), viz stav_funkce()
         # Stav výhybek: stav (0/1/None = neznámý), cas (HH:MM:SS), zdroj ("skript" = povel ze skriptu, "Z21" = hlášení centrály)
         self.vyhybky = {adresa: {"stav": None, "cas": None, "zdroj": None} for adresa in vyhybky}
@@ -295,7 +297,7 @@ class Z21:
                         for adresa in self.vyhybky:
                             self._dotaz_vyhybka(adresa)
                     # Dotaz zároveň obnoví přihlášení k hlášením lokomotivy (Z21 jich drží jen několik posledních)
-                    for adresa in self.sledovane_lokomotivy:
+                    for adresa in self.sledovane_lokomotivy():
                         self._dotaz_loko(adresa)
                     posledni_prihlaseni = time.time()
                 if time.time() - posledni_dotaz_stav >= Z21_STAV_INTERVAL:
@@ -304,7 +306,7 @@ class Z21:
                     for adresa in self.vyhybky:
                         if self.vyhybky[adresa]["stav"] is None:
                             self._dotaz_vyhybka(adresa)
-                    for adresa in self.sledovane_lokomotivy:
+                    for adresa in self.sledovane_lokomotivy():
                         if adresa not in self._loko_info:
                             self._dotaz_loko(adresa)
                     posledni_dotaz_stav = time.time()

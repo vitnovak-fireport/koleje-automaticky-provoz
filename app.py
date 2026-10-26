@@ -114,8 +114,29 @@ def stav():
         "uceni": {str(k): v for k, v in provoz.uceni.items()},
         "nastaveni": provoz.nastaveni,
         "lokomotivy": {str(k): v["nazev"] for k, v in LOKOMOTIVY.items()},
+        "rychlosti": rychlosti_lokomotiv(),
         "log": list(provoz.log)[-60:],
     })
+
+
+def rychlosti_lokomotiv():
+    """Aktuální rychlost (0-127) a směr obou lokomotiv na trati. Přednost má to, co hlásí Z21
+    (zachytí i změnu z jiného ovladače), jinak poslední povel ze skriptu."""
+    z21 = provoz.z21
+    vysledek = []
+    for kolej in (3, 4):
+        loco = provoz.nastaveni[f"loco_seg{kolej}"]
+        hlaseni = z21.lokomotivy_z21.get(loco) if z21.odpovida() else None
+        rychlost, smer = hlaseni or (z21.rychlosti.get(loco, 0), z21.smery.get(loco, 1))
+        vysledek.append({
+            "adresa": loco,
+            "kolej": kolej,
+            "rychlost": rychlost,
+            "smer": smer,
+            "povel": z21.rychlosti.get(loco),  # Poslední rychlost odeslaná ze skriptu, None = zatím žádná
+            "z21": hlaseni is not None,
+        })
+    return vysledek
 
 
 def stav_tlacitka():

@@ -101,6 +101,15 @@ input[type=checkbox] { width: 24px; height: 24px; accent-color: var(--accent); }
   gap: 4px 12px; padding: 8px 0; border-bottom: 1px solid var(--line);
 }
 .loko:last-child { border-bottom: 0; }
+.rychlost {
+  display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: baseline;
+  padding: 8px 0; border-bottom: 1px solid var(--line);
+}
+.rychlost:last-child { border-bottom: 0; }
+.rychlost .hodnota { font-size: 1.15rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.rychlost .pruh, .rychlost .muted { grid-column: 1 / -1; }
+.pruh { height: 10px; border-radius: 5px; background: var(--free); overflow: hidden; }
+.pruh i { display: block; height: 100%; background: var(--accent); transition: width .4s; }
 .kolejiste svg { display: block; width: 100%; height: auto; }
 .seg-kolej path {
   fill: none; stroke: var(--track); stroke-width: 7; stroke-linecap: round;

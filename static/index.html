@@ -35,6 +35,11 @@
   </section>
 
   <section class="card">
+    <h2>Rychlost lokomotiv</h2>
+    <div id="rychlosti"></div>
+  </section>
+
+  <section class="card">
     <h2>Napájení z Z21</h2>
     <div class="mereni" id="mereni">
       <div><span>Napětí</span><b id="m-napeti">–</b></div>
@@ -198,6 +203,28 @@
     }, s.vyhybky, s.vyhybky_koleje, s.osvetleni_tunelu);
 
     vykresliVyhybky($("vyhybky"), s.vyhybky, s.cesta);
+
+    $("rychlosti").replaceChildren(...s.rychlosti.map((l) => {
+      const radek = document.createElement("div");
+      radek.className = "rychlost";
+      const jmeno = document.createElement("b");
+      jmeno.textContent = nazev(l.adresa);
+      const hodnota = document.createElement("span");
+      hodnota.className = "hodnota";
+      hodnota.textContent = l.rychlost > 0 ? `${l.smer ? "▶" : "◀"} ${l.rychlost}` : "stojí";
+      const pruh = document.createElement("div");
+      pruh.className = "pruh";
+      const vypln = document.createElement("i");
+      vypln.style.width = `${(l.rychlost / 127) * 100}%`;
+      pruh.append(vypln);
+      const info = document.createElement("span");
+      info.className = "muted";
+      info.textContent = `kolej ${l.kolej} · ${l.smer ? "vpřed" : "vzad"} · `
+        + (l.z21 ? "hlásí Z21" : "podle povelu, Z21 zatím nehlásí")
+        + (l.z21 && l.povel != null && l.povel !== l.rychlost ? ` · povel ${l.povel}` : "");
+      radek.append(jmeno, hodnota, pruh, info);
+      return radek;
+    }));
 
     const m = s.mereni;
     const cislo = (h, des) => h.toLocaleString("cs-CZ", { minimumFractionDigits: des, maximumFractionDigits: des });

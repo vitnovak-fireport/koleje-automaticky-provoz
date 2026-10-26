@@ -112,7 +112,7 @@ class Provoz:
 
         # Centrála Z21 - povely lokomotivám a výhybkám, hlášení výhybek a napájení kolejiště
         self.z21 = Z21(Z21_IP, Z21_PORT, VYHYBKY, self.zapis, nazev=self.nazev, ted=self.ted,
-                       lokomotivy=(OSVETLENI_TUNELU[0],))
+                       lokomotivy=lambda: {OSVETLENI_TUNELU[0], self.nastaveni["loco_seg3"], self.nastaveni["loco_seg4"]})
 
         # Detekce obsazení segmentů přes MQTT
         self.obsazenost = Obsazenost(MQTT_BROKER, MQTT_PORT, MQTT_TOPIC, self.zapis, vychozi={
