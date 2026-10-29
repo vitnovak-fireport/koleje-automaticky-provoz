@@ -96,8 +96,8 @@ class Provoz:
         self.nastaveni = dict(VYCHOZI_NASTAVENI)
         self.nastaveni.update(nastaveni or {})
 
-        # Naučené charakteristiky vlaků podle adresy lokomotivy:
-        # smer_pres_seg1 (vjíždí nejdříve do segmentu 1?)
+        # Směr vlaků podle adresy lokomotivy, zjišťuje se při každé jízdě (vlak mohl být mezitím otočen):
+        # smer_pres_seg1 (vjíždí nejdříve do segmentu 1?) - platí pro aktuální nebo poslední jízdu
         self.uceni = {}
 
         self.faze = "Zastaveno"
@@ -287,7 +287,7 @@ class Provoz:
         return self.obsazenost.zmeneno[segment_id]
 
     def zjisti_smer(self, loco):
-        """Při výjezdu ze stanice zjistí, jestli vlak vjede nejdříve do segmentu 1, nebo 2."""
+        """Při výjezdu ze stanice zjistí, jestli vlak vjede nejdříve do segmentu 1, nebo 2 (jednou za jízdu)."""
         info = self.uceni.setdefault(loco, {})
         if "smer_pres_seg1" in info:
             return
@@ -298,7 +298,7 @@ class Provoz:
             else:
                 prvni = 1 if segmenty[1] else 2
             info["smer_pres_seg1"] = prvni == 1
-            self.zapis(f"Učení: {self.nazev(loco)} vjíždí ze stanice nejdříve do segmentu {prvni}.")
+            self.zapis(f"Směr: {self.nazev(loco)} vjíždí ze stanice nejdříve do segmentu {prvni}.")
 
     def ohlas_zastavku(self, loco):
         """Vlak vypravený tlačítkem vjel ze stanice do segmentu 1 - ohlásí, že může zastavit na znamení."""
@@ -406,8 +406,9 @@ class Provoz:
             self._hlaseni_zastavky = False
 
     def _vyjizdi(self, loco):
-        """Vlak vyjíždí ze stanice - nová jízda, o zastávce zatím nepadlo rozhodnutí."""
+        """Vlak vyjíždí ze stanice - nová jízda, směr se zjistí znovu a o zastávce zatím nepadlo rozhodnutí."""
         with self._zastavka_zamek:
+            self.uceni.pop(loco, None)
             self.jedouci_loco = loco
             self.zastavka_rozhodnuta = False
             self.zastavka_pozadana = False

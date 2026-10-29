@@ -183,13 +183,6 @@ def tlacitko():
     return jsonify(ok=True)
 
 
-@app.post("/api/zapomenout")
-def zapomenout():
-    provoz.uceni.clear()
-    provoz.zapis("Naučené charakteristiky vlaků smazány, při příští jízdě se naučí znovu.")
-    return jsonify(ok=True)
-
-
 @app.post("/api/nastaveni")
 def nastaveni():
     zmeny, chyba = over_nastaveni(request.get_json(silent=True) or {})

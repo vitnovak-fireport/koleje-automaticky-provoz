@@ -120,11 +120,8 @@
   </section>
 
   <section class="card">
-    <h2>Naučené vlaky</h2>
-    <div id="uceni" class="muted">Zatím nic – směr se vlak naučí při první jízdě.</div>
-    <div class="tlacitka" style="margin-top:10px">
-      <button id="btn-zapomenout">Zapomenout naučené</button>
-    </div>
+    <h2>Směr vlaků při poslední jízdě</h2>
+    <div id="uceni" class="muted">Zatím nic – směr se zjistí při jízdě.</div>
   </section>
   </div>
 
@@ -270,7 +267,7 @@
     const uceni = Object.entries(s.uceni).filter(([, v]) => "smer_pres_seg1" in v);
     $("uceni").textContent = uceni.length
       ? uceni.map(([loco, v]) => `${nazev(loco)}: jede nejdříve do segmentu ${v.smer_pres_seg1 ? "1 – staví na zastávce" : "2 – zastávkou projíždí"}`).join("\n")
-      : "Zatím nic – směr se vlak naučí při první jízdě.";
+      : "Zatím nic – směr se zjistí při jízdě.";
     $("uceni").style.whiteSpace = "pre-line";
 
     const logText = JSON.stringify(s.log);
@@ -304,9 +301,6 @@
   $("btn-ve-stanici").onclick = async () => { await post("/api/zastavit-ve-stanici"); obnov(); };
   $("btn-zastavit").onclick = async () => { await post("/api/zastavit"); obnov(); };
   $("btn-tlacitko").onclick = async () => { await post("/api/tlacitko"); obnov(); };
-  $("btn-zapomenout").onclick = async () => {
-    if (confirm("Smazat naučené směry vlaků?")) { await post("/api/zapomenout"); obnov(); }
-  };
 
   form.onsubmit = async (e) => {
     e.preventDefault();
